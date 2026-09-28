@@ -7,7 +7,7 @@ import type { EnvDiagnostics, Settings } from '@shared/types'
  * GUI apps don't inherit the environment of the user's interactive shell. On macOS/Linux
  * an app launched from the dock never sources ~/.zshrc, so hooks that call `node`, `npx`,
  * `pnpm`, `python` (installed via nvm, asdf, pyenv, volta, homebrew...) fail with
- * "command not found" — the #1 reason hooks break in GUI Git clients. We resolve the login
+ * "command not found", the #1 reason hooks break in GUI Git clients. We resolve the login
  * shell environment once and use it for every git invocation.
  */
 

@@ -49,7 +49,7 @@ export function HookConsole({ open, onToggle }: { open: boolean; onToggle(open: 
           <span className="row" style={{ gap: 6, fontSize: 12 }}>
             <span className={`dot ${runStatus(latest)}`} />
             <span className="dim">{latest.title}</span>
-            {latest.failedHook && <span style={{ color: 'var(--red)' }}>— {latest.failedHook} hook failed</span>}
+            {latest.failedHook && <span style={{ color: 'var(--red)' }}>{latest.failedHook} hook failed</span>}
           </span>
         ) : (
           <span className="faint" style={{ fontSize: 12 }}>No commands run yet</span>

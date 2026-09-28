@@ -241,7 +241,7 @@ export const HOOK_DOCS: Record<string, string> = {
 }
 
 export const HOOK_TEMPLATE = (name: string) => `#!/bin/sh
-# ${name} hook — ${HOOK_DOCS[name] ?? ''}
+# ${name} hook: ${HOOK_DOCS[name] ?? ''}
 # Exit with a non-zero status to abort.
 
 echo "Running ${name}…"

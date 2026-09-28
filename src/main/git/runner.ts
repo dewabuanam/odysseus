@@ -47,8 +47,8 @@ interface ActiveRun {
 
 /**
  * Parses git's trace2 event stream (JSON lines) incrementally. Every `git` process spawned
- * with GIT_TRACE2_EVENT set appends to the same file — including git commands run *inside*
- * hooks (lint-staged, husky...) — so we only accept events from the root session id.
+ * with GIT_TRACE2_EVENT set appends to the same file, including git commands run *inside*
+ * hooks (lint-staged, husky...), so we only accept events from the root session id.
  */
 export class Trace2HookTracker {
   private offset = 0
@@ -160,7 +160,7 @@ function execText(cmd: string, args: string[], env?: NodeJS.ProcessEnv): Promise
 
 /**
  * Windows: hooks run under Git for Windows' MSYS shell. MSYS emulates fork+exec, which breaks
- * the Windows parent-process chain — `taskkill /T` on git.exe leaves `sleep`, `node`, test
+ * the Windows parent-process chain: `taskkill /T` on git.exe leaves `sleep`, `node`, test
  * runners etc. alive. We combine the Windows process table with MSYS's own table (whose
  * PPIDs survive exec) to find every descendant.
  */
@@ -280,7 +280,7 @@ export class GitRunner {
             events.output({
               runId,
               stream: 'stderr',
-              text: `\n[odysseus] Hook "${e.hook}" exceeded ${settings.hookTimeoutSec}s timeout — killing.\n`
+              text: `\n[odysseus] Hook "${e.hook}" exceeded ${settings.hookTimeoutSec}s timeout, killing.\n`
             })
             this.cancel(runId)
           }, settings.hookTimeoutSec * 1000)

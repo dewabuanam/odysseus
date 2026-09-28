@@ -157,7 +157,7 @@ async function main() {
   })
 
   await test('pre-commit + commit-msg both tracked; nested git calls ignored', async () => {
-    // pre-commit runs git itself (like lint-staged does) — must not produce phantom hook events
+    // pre-commit runs git itself (like lint-staged does) and must not produce phantom hook events
     writeHook(dir, 'pre-commit', 'git status --short >/dev/null\ngit rev-parse HEAD >/dev/null\necho pre-ok')
     writeHook(dir, 'commit-msg', 'grep -qE "^(feat|fix|chore):" "$1" || { echo "bad message format" >&2; exit 1; }')
     writeFileSync(join(dir, 'b.txt'), 'v3\n')

@@ -116,7 +116,7 @@ export function CommitList({ commits, graph, status, selected, onSelect, onConte
             <circle cx={x(graph[0]?.lane ?? 0)} cy={ROW_H / 2} r={4.5} fill="none" stroke="var(--gold)" strokeWidth={2} strokeDasharray="2 2" />
           </svg>
           <span className="subject">
-            {changes > 0 ? `Uncommitted changes (${changes})` : 'Working directory — no commits yet'}
+            {changes > 0 ? `Uncommitted changes (${changes})` : 'Working directory (no commits yet)'}
           </span>
         </div>
       )

@@ -81,18 +81,37 @@ export class GitRepo {
     return { ...parsed, operation }
   }
 
-  async log(limit = 3000): Promise<{ commits: Commit[]; graph: GraphRow[] }> {
-    if (!(await this.hasHead())) {
-      const anyRefs = (await this.data(['for-each-ref', '--count=1', 'refs/'])).trim()
-      if (!anyRefs) return { commits: [], graph: [] }
-    }
+  private logCache: { key: string; commits: Commit[]; graph: GraphRow[] } | null = null
+
+  /**
+   * Cheap fingerprint of every ref + HEAD. The full log and graph layout are only recomputed
+   * (and only sent over IPC) when this changes.
+   */
+  private async refsKey(limit: number): Promise<string> {
+    const [refs, head] = await Promise.all([
+      this.data(['for-each-ref', '--format=%(objectname) %(refname)']),
+      this.data(['rev-parse', '-q', '--verify', 'HEAD'], { allowExit: [1] })
+    ])
+    return `${limit}\n${head.trim()}\n${refs}`
+  }
+
+  async log(
+    limit = 3000,
+    knownKey?: string
+  ): Promise<{ key: string; unchanged?: boolean; commits: Commit[]; graph: GraphRow[] }> {
+    const key = await this.refsKey(limit)
+    if (knownKey === key) return { key, unchanged: true, commits: [], graph: [] }
+    if (this.logCache?.key === key) return this.logCache
+    const head = key.split('\n')[1]
+    const hasRefs = key.split('\n').slice(2).join('').trim() !== ''
+    if (!head && !hasRefs) return { key, commits: [], graph: [] }
     const [out, remotes] = await Promise.all([
       this.data([
         'log',
         '--branches',
         '--remotes',
         '--tags',
-        ...((await this.hasHead()) ? ['HEAD'] : []),
+        ...(head ? ['HEAD'] : []),
         '--topo-order',
         `--max-count=${limit}`,
         `--format=${LOG_FORMAT}`
@@ -106,7 +125,8 @@ export class GitRepo {
         if (r.type === 'remote' && !remoteNames.some((n) => r.name.startsWith(n))) r.type = 'branch'
       }
     }
-    return { commits, graph: layoutGraph(commits) }
+    this.logCache = { key, commits, graph: layoutGraph(commits) }
+    return this.logCache
   }
 
   async commitDetail(sha: string): Promise<CommitDetail> {

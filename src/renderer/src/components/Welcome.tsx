@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { RepoSummary } from '@shared/types'
 import { api } from '../api'
 import { useUi } from '../ui'
+import { formatKeys } from '../palette'
 import logo from '../assets/logo.png'
 
 export function Welcome({ onOpen }: { onOpen(dir: string): void }) {
@@ -46,6 +47,9 @@ export function Welcome({ onOpen }: { onOpen(dir: string): void }) {
           >
             {busy ? <span className="spinner" /> : null} Clone…
           </button>
+        </div>
+        <div className="faint" style={{ marginTop: 14, fontSize: 12 }}>
+          Press <kbd>{formatKeys('Mod+P')}</kbd> for commands, <kbd>{formatKeys('Mod+Shift+O')}</kbd> for recent repositories
         </div>
         {recent.length > 0 && (
           <div className="recent">

@@ -35,7 +35,7 @@ export function SettingsDialog({ onClose, onSaved }: { onClose(): void; onSaved(
       <div className="field">
         <label className="check">
           <input type="checkbox" checked={s.useLoginShellEnv} onChange={(e) => setS({ ...s, useLoginShellEnv: e.target.checked })} />
-          Load environment from login shell (macOS / Linux — picks up nvm, asdf, pyenv, volta, homebrew)
+          Load environment from login shell (macOS / Linux: picks up nvm, asdf, pyenv, volta, homebrew)
         </label>
       </div>
       <div className="field">
@@ -85,7 +85,7 @@ export function SettingsDialog({ onClose, onSaved }: { onClose(): void; onSaved(
               {Object.entries(diag.tools).map(([tool, p]) => (
                 <tr key={tool}>
                   <td className="mono" style={{ width: 110 }}>{tool}</td>
-                  <td className="mono" style={{ color: p ? 'var(--text-dim)' : 'var(--text-faint)' }}>{p ?? '— not found'}</td>
+                  <td className="mono" style={{ color: p ? 'var(--text-dim)' : 'var(--text-faint)' }}>{p ?? 'not found'}</td>
                 </tr>
               ))}
             </tbody>

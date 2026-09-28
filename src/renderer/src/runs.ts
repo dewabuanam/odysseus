@@ -45,7 +45,9 @@ function update(id: string, fn: (r: RunState) => RunState): void {
 export const runStore = {
   subscribe(l: Listener) {
     listeners.add(l)
-    return () => listeners.delete(l)
+    return () => {
+      listeners.delete(l)
+    }
   },
   get: () => runs,
   clear() {

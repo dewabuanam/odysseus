@@ -5,11 +5,11 @@ import { useRepo } from '../repoContext'
 import { HOOK_DOCS, HOOK_TEMPLATE, useUi } from '../ui'
 
 const MANAGER_NOTES: Record<string, string> = {
-  husky: 'Husky detected — edit the scripts in .husky/<hook>; files in .husky/_ are generated wrappers.',
-  lefthook: 'Lefthook detected — hook behaviour is configured in lefthook.yml.',
-  'pre-commit': 'pre-commit framework detected — hooks are configured in .pre-commit-config.yaml.',
-  overcommit: 'Overcommit detected — configure hooks in .overcommit.yml.',
-  'simple-git-hooks': 'simple-git-hooks detected — hooks are configured in package.json.'
+  husky: 'Husky detected. Edit the scripts in .husky/<hook>; files in .husky/_ are generated wrappers.',
+  lefthook: 'Lefthook detected. Hook behaviour is configured in lefthook.yml.',
+  'pre-commit': 'pre-commit framework detected. Hooks are configured in .pre-commit-config.yaml.',
+  overcommit: 'Overcommit detected. Configure hooks in .overcommit.yml.',
+  'simple-git-hooks': 'simple-git-hooks detected. Hooks are configured in package.json.'
 }
 
 function hookState(h: HookInfo): { cls: string; label: string } {
@@ -19,11 +19,12 @@ function hookState(h: HookInfo): { cls: string; label: string } {
   return { cls: 'ok', label: 'active' }
 }
 
-export function HooksView({ onOpenSettings }: { onOpenSettings(): void }) {
+export function HooksView({ selected: selectedProp, onSelect, onOpenSettings }: { selected: string; onSelect(h: HookName): void; onOpenSettings(): void }) {
   const repo = useRepo()
   const ui = useUi()
   const overview = repo.hooks
-  const [selected, setSelected] = useState<HookName>('pre-commit')
+  const selected = selectedProp as HookName
+  const setSelected = onSelect
   const [content, setContent] = useState('')
   const [original, setOriginal] = useState('')
   const [showAll, setShowAll] = useState(false)
@@ -49,7 +50,7 @@ export function HooksView({ onOpenSettings }: { onOpenSettings(): void }) {
   const visible = overview.hooks.filter((h) => showAll || h.exists || ['pre-commit', 'commit-msg', 'pre-push', 'prepare-commit-msg', 'post-checkout', 'post-merge'].includes(h.name))
   const dirty = content !== original
   const act = async (fn: () => Promise<unknown>, msg: string) => {
-    if (await repo.mutate(fn)) ui.toast(msg)
+    if (await repo.mutate(fn, ['hooks'])) ui.toast(msg)
   }
 
   return (

@@ -55,6 +55,14 @@ export function WorkingPanel() {
 
   useEffect(() => saveDraft(repo.root, message), [repo.root, message])
 
+  const textRef = useRef<HTMLTextAreaElement>(null)
+  const actionRef = useRef<(a: string) => void>(() => {})
+  useEffect(() => {
+    const on = (e: Event) => actionRef.current((e as CustomEvent<string>).detail)
+    window.addEventListener('ody:commit', on)
+    return () => window.removeEventListener('ody:commit', on)
+  }, [])
+
   const keyOf = (area: Area, f: FileChange) => `${area}:${f.path}`
 
   const loadDiff = useCallback(async (area: Area, f: FileChange) => {
@@ -185,6 +193,16 @@ export function WorkingPanel() {
     if (r) doCommit(true)
   }
 
+  actionRef.current = (a: string) => {
+    if (a === 'focus') textRef.current?.focus()
+    else if (a === 'commit') doCommit()
+    else if (a === 'commit-no-verify') commitAnyway()
+    else if (a === 'amend') {
+      toggleAmend(!amend)
+      textRef.current?.focus()
+    }
+  }
+
   const running = committing && activeRun
   const runningStep = activeRun?.steps.find((s) => s.state === 'running')
   const total = status.staged.length + status.unstaged.length + status.conflicted.length
@@ -224,7 +242,7 @@ export function WorkingPanel() {
         <div className="op-banner">
           <span className="grow">
             Repository is <b>{status.operation}</b>
-            {status.conflicted.length > 0 && ` — ${status.conflicted.length} conflicted file(s)`}
+            {status.conflicted.length > 0 && `, ${status.conflicted.length} conflicted file(s)`}
           </span>
           <button className="btn small" onClick={() => repo.exec(() => api.abortOperation(status.operation!))}>Abort</button>
           <button className="btn small primary" disabled={status.conflicted.length > 0} onClick={() => repo.exec(() => api.continueOperation(status.operation!))}>
@@ -235,6 +253,7 @@ export function WorkingPanel() {
 
       <div className="commit-box">
         <textarea
+          ref={textRef}
           className="textarea"
           placeholder={'Commit message\n\nSummary on first line, details below.  (Ctrl+Enter to commit)'}
           value={message}
@@ -329,7 +348,7 @@ export function WorkingPanel() {
         )}
       </div>
 
-      {total === 0 && <div className="empty">Nothing to commit — working tree clean.</div>}
+      {total === 0 && <div className="empty">Nothing to commit. Working tree clean.</div>}
 
       {status.conflicted.length > 0 && (
         <>

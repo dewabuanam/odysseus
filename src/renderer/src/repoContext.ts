@@ -1,6 +1,8 @@
 import { createContext, useContext } from 'react'
 import type { Branch, CommandResult, HooksOverview, Remote, Stash, Tag, WorkingStatus } from '@shared/types'
 
+export type RefreshScope = 'status' | 'refs' | 'hooks'
+
 export interface RepoCtx {
   root: string
   status: WorkingStatus | null
@@ -9,11 +11,11 @@ export interface RepoCtx {
   stashes: Stash[]
   remotes: Remote[]
   hooks: HooksOverview | null
-  refresh(): Promise<void>
+  refresh(scopes?: RefreshScope[]): Promise<void>
   /** Run a hook-aware command: reports failures, opens the console, refreshes afterwards. */
   exec(fn: () => Promise<CommandResult>, success?: string): Promise<CommandResult>
   /** Run a simple data mutation with error toast + refresh. */
-  mutate(fn: () => Promise<unknown>): Promise<boolean>
+  mutate(fn: () => Promise<unknown>, scopes?: RefreshScope[]): Promise<boolean>
   openConsole(): void
   select(sha: string): void
 }

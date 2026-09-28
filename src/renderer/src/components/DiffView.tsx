@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { FileDiff } from '@shared/types'
 
+const MAX_LINES = 1500
+
 export type DiffMode = 'unstaged' | 'staged' | 'commit'
 
 interface Props {
@@ -12,12 +14,16 @@ interface Props {
 
 /**
  * Renders a unified diff. In working-directory modes each hunk can be staged, unstaged or
- * discarded — whole, or just the lines the user clicked (shift-click selects a range).
+ * discarded, whole or just the lines the user clicked (shift-click selects a range).
  */
 export function DiffView({ diff, mode, loading, onApply }: Props) {
   const [sel, setSel] = useState<{ hunk: number; lines: Set<number>; anchor: number } | null>(null)
+  const [showAll, setShowAll] = useState(false)
 
-  useEffect(() => setSel(null), [diff])
+  useEffect(() => {
+    setSel(null)
+    setShowAll(false)
+  }, [diff])
 
   if (loading && !diff) return <div className="diff"><div className="diff-empty">Loading diff…</div></div>
   if (!diff) return <div className="diff"><div className="diff-empty">No changes to show.</div></div>
@@ -44,9 +50,19 @@ export function DiffView({ diff, mode, loading, onApply }: Props) {
     })
   }
 
+  // Rendering tens of thousands of DOM rows (lockfiles, generated code) stalls the UI.
+  // Show a budget of lines and let the user opt in to the rest.
+  const totalLines = diff.hunks.reduce((n, h) => n + h.lines.length, 0)
+  let budget = showAll ? Infinity : MAX_LINES
+  const visibleHunks = diff.hunks.filter((h) => {
+    if (budget <= 0) return false
+    budget -= h.lines.length
+    return true
+  })
+
   return (
     <div className="diff">
-      {diff.hunks.map((h, hi) => {
+      {visibleHunks.map((h, hi) => {
         const selected = sel?.hunk === hi ? [...sel.lines].sort((a, b) => a - b) : null
         const what = selected ? `${selected.length} line${selected.length > 1 ? 's' : ''}` : 'hunk'
         return (
@@ -83,6 +99,12 @@ export function DiffView({ diff, mode, loading, onApply }: Props) {
           </div>
         )
       })}
+      {visibleHunks.length < diff.hunks.length && (
+        <div className="diff-empty row">
+          <span className="grow">Large diff: showing {visibleHunks.reduce((n, h) => n + h.lines.length, 0)} of {totalLines} lines.</span>
+          <button className="btn small" onClick={() => setShowAll(true)}>Show all</button>
+        </div>
+      )}
     </div>
   )
 }

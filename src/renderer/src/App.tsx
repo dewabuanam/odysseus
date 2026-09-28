@@ -16,8 +16,10 @@ import type {
   WorkingStatus
 } from '@shared/types'
 import { api } from './api'
-import { RepoContext, type RepoCtx } from './repoContext'
-import { runStore, useActiveRun } from './runs'
+import { branchPicker, buildCommands, recentPicker, type CommandDeps, type CommitAction } from './commands'
+import { matchesKeys, Palette, type Step } from './palette'
+import { RepoContext, type RepoCtx, type RefreshScope } from './repoContext'
+import { runStore } from './runs'
 import { UiProvider, useUi } from './ui'
 import { CommitList } from './components/CommitList'
 import { CommitPanel } from './components/CommitPanel'
@@ -25,9 +27,9 @@ import { HookConsole } from './components/HookConsole'
 import { HooksView } from './components/HooksView'
 import { SettingsDialog } from './components/SettingsDialog'
 import { Sidebar } from './components/Sidebar'
+import { TitleBar } from './components/TitleBar'
 import { Welcome } from './components/Welcome'
 import { WorkingPanel } from './components/WorkingPanel'
-import logo from './assets/logo.png'
 
 export function App() {
   return (
@@ -36,6 +38,8 @@ export function App() {
     </UiProvider>
   )
 }
+
+const ALL: RefreshScope[] = ['status', 'refs', 'hooks']
 
 function Shell() {
   const ui = useUi()
@@ -50,65 +54,84 @@ function Shell() {
   const [hooks, setHooks] = useState<HooksOverview | null>(null)
   const [selected, setSelected] = useState<string | null>('working')
   const [view, setView] = useState<'history' | 'hooks'>('history')
+  const [hookSel, setHookSel] = useState<string>('pre-commit')
   const [consoleOpen, setConsoleOpen] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [palette, setPalette] = useState<Step | null>(null)
   const [listWidth, setListWidth] = useState(46)
-  const activeRun = useActiveRun()
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark')
+  const logKey = useRef<string | undefined>(undefined)
   const refreshing = useRef(false)
-  const pending = useRef(false)
+  const queued = useRef(new Set<RefreshScope>())
 
-  // Forward main-process events to the run store.
-  useEffect(() => {
-    return window.ody.on((channel, payload) => {
-      if (channel === 'runStart') runStore.onStart(payload as RunStartEvent)
-      else if (channel === 'output') runStore.onOutput(payload as OutputEvent)
-      else if (channel === 'hook') {
-        runStore.onHook(payload as HookEvent)
-      } else if (channel === 'runEnd') runStore.onEnd(payload as RunEndEvent)
-      else if (channel === 'repoChanged' || channel === 'focus') refreshRef.current()
-    })
-  }, [])
+  // ------------------------------------------------------------ refresh (scoped)
 
-  const refresh = useCallback(async () => {
-    if (!repo) return
-    if (refreshing.current) {
-      pending.current = true
-      return
-    }
-    refreshing.current = true
-    try {
-      const [s, l, b, t, st, r, h] = await Promise.all([
-        api.status(),
-        api.log(),
-        api.branches(),
-        api.tags(),
-        api.stashes(),
-        api.remotes(),
-        api.hooksOverview().catch(() => null)
-      ])
-      setStatus(s)
-      setLog(l)
-      setBranches(b)
-      setTags(t)
-      setStashes(st)
-      setRemotes(r)
-      setHooks(h)
-    } catch (e) {
-      console.error(e)
-    } finally {
-      refreshing.current = false
-      if (pending.current) {
-        pending.current = false
-        refreshRef.current()
+  const refresh = useCallback(
+    async (scopes: RefreshScope[] = ALL) => {
+      if (!repo) return
+      scopes.forEach((s) => queued.current.add(s))
+      if (refreshing.current) return
+      refreshing.current = true
+      try {
+        while (queued.current.size) {
+          const want = new Set(queued.current)
+          queued.current.clear()
+          const jobs: Promise<unknown>[] = []
+          // Ref changes can change status (checkout) so they always imply a status refresh.
+          if (want.has('status') || want.has('refs')) jobs.push(api.status().then(setStatus))
+          if (want.has('refs')) {
+            jobs.push(
+              api.log(undefined, logKey.current).then((l) => {
+                logKey.current = l.key
+                if (!l.unchanged) setLog({ commits: l.commits, graph: l.graph })
+              }),
+              api.branches().then(setBranches),
+              api.tags().then(setTags),
+              api.stashes().then(setStashes),
+              api.remotes().then(setRemotes)
+            )
+          }
+          if (want.has('hooks')) jobs.push(api.hooksOverview().then(setHooks, () => setHooks(null)))
+          await Promise.all(jobs).catch((e) => console.error(e))
+        }
+      } finally {
+        refreshing.current = false
       }
-    }
-  }, [repo])
+    },
+    [repo]
+  )
   const refreshRef = useRef(refresh)
   refreshRef.current = refresh
 
   useEffect(() => {
-    refresh()
+    logKey.current = undefined
+    refresh(ALL)
   }, [refresh])
+
+  // Forward main-process events.
+  useEffect(() => {
+    return window.ody.on((channel, payload) => {
+      if (channel === 'runStart') runStore.onStart(payload as RunStartEvent)
+      else if (channel === 'output') runStore.onOutput(payload as OutputEvent)
+      else if (channel === 'hook') runStore.onHook(payload as HookEvent)
+      else if (channel === 'runEnd') runStore.onEnd(payload as RunEndEvent)
+      else if (channel === 'repoChanged') refreshRef.current((payload as { scopes: RefreshScope[] }).scopes)
+      else if (channel === 'focus') refreshRef.current(['status', 'refs'])
+    })
+  }, [])
+
+  // Auto-open the console as soon as a hook starts.
+  useEffect(
+    () =>
+      runStore.subscribe(() => {
+        const active = runStore.get().find((r) => r.endedAt === undefined)
+        if (active?.steps.length) setConsoleOpen(true)
+      }),
+    []
+  )
+
+  // ------------------------------------------------------------ actions
 
   const openRepo = useCallback(
     async (dir: string) => {
@@ -116,6 +139,7 @@ function Shell() {
         const r = await api.openRepo(dir)
         setStatus(null)
         setLog({ commits: [], graph: [] })
+        setHooks(null)
         setSelected('working')
         setView('history')
         setRepo(r)
@@ -126,10 +150,10 @@ function Shell() {
     [ui]
   )
 
-  // Boot: theme + reopen last repository.
   useEffect(() => {
     ;(async () => {
       const s = await api.getSettings()
+      setTheme(s.theme)
       document.documentElement.dataset.theme = s.theme
       const last = await api.lastRepo()
       if (last) await openRepo(last)
@@ -137,11 +161,6 @@ function Shell() {
     })()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
-
-  // Auto-open the console when a hook starts running.
-  useEffect(() => {
-    if (activeRun?.steps.length) setConsoleOpen(true)
-  }, [activeRun?.steps.length])
 
   const exec = useCallback(
     async (fn: () => Promise<CommandResult>, success?: string): Promise<CommandResult> => {
@@ -157,17 +176,16 @@ function Shell() {
         ui.toast('Cancelled', true)
       } else {
         setConsoleOpen(true)
-        const reason = res.failedHook ? `${res.failedHook} hook failed` : lastLine(res.stderr) || 'Command failed'
-        ui.toast(reason, true)
+        ui.toast(res.failedHook ? `${res.failedHook} hook failed` : lastLine(res.stderr) || 'Command failed', true)
       }
-      await refreshRef.current()
+      await refreshRef.current(['status', 'refs'])
       return res
     },
     [ui]
   )
 
   const mutate = useCallback(
-    async (fn: () => Promise<unknown>) => {
+    async (fn: () => Promise<unknown>, scopes: RefreshScope[] = ['status']) => {
       try {
         await fn()
         return true
@@ -175,7 +193,7 @@ function Shell() {
         ui.toast((e as Error).message, true)
         return false
       } finally {
-        await refreshRef.current()
+        await refreshRef.current(scopes)
       }
     },
     [ui]
@@ -185,6 +203,86 @@ function Shell() {
     setView('history')
     setSelected(sha)
   }, [])
+
+  const commitAction = useCallback((a: CommitAction) => {
+    setView('history')
+    setSelected('working')
+    // Let WorkingPanel mount before it receives the action.
+    setTimeout(() => window.dispatchEvent(new CustomEvent('ody:commit', { detail: a })), 30)
+  }, [])
+
+  const toggleTheme = useCallback(async () => {
+    const next = theme === 'dark' ? 'light' : 'dark'
+    setTheme(next)
+    document.documentElement.dataset.theme = next
+    await api.setSettings({ theme: next })
+  }, [theme])
+
+  // ------------------------------------------------------------ commands
+
+  const deps: CommandDeps = {
+    repo,
+    status,
+    branches,
+    tags,
+    stashes,
+    commits: log.commits,
+    hooks,
+    exec,
+    mutate: (fn) => mutate(fn, ['status', 'hooks']),
+    ask: ui.ask,
+    toast: ui.toast,
+    openRepo,
+    closeRepo: () => setRepo(null),
+    select,
+    showHooks: (h) => {
+      if (h) setHookSel(h)
+      setView('hooks')
+    },
+    commitAction,
+    toggleConsole: () => setConsoleOpen((o) => !o),
+    toggleSidebar: () => setSidebarOpen((o) => !o),
+    toggleTheme,
+    openSettings: () => setSettingsOpen(true),
+    refresh: () => refreshRef.current(ALL)
+  }
+  const commands = buildCommands(deps)
+  const commandsRef = useRef(commands)
+  commandsRef.current = commands
+  const depsRef = useRef(deps)
+  depsRef.current = deps
+
+  const openPalette = useCallback((step?: Step) => {
+    setPalette(step ?? { kind: 'list', placeholder: 'Type a command…', items: commandsRef.current })
+  }, [])
+
+  // Global shortcuts come from the same command table the palette shows.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (palette || settingsOpen) return
+      const mod = e.ctrlKey || e.metaKey
+      if (mod && !e.altKey && (e.key.toLowerCase() === 'p' || e.code === 'KeyP')) {
+        e.preventDefault()
+        openPalette()
+        return
+      }
+      const inText = (e.target as HTMLElement).closest('input, textarea, select')
+      for (const c of commandsRef.current) {
+        if (!c.keys || c.when === false) continue
+        // Let the commit box handle Mod+Enter itself.
+        if (inText && c.keys === 'Mod+Enter') continue
+        if (inText && !c.keys.includes('Mod') && !c.keys.startsWith('F')) continue
+        if (matchesKeys(e, c.keys)) {
+          e.preventDefault()
+          const r = c.run()
+          Promise.resolve(r).then((step) => step && openPalette(step))
+          return
+        }
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [palette, settingsOpen, openPalette])
 
   const ctx: RepoCtx | null = useMemo(
     () =>
@@ -205,28 +303,6 @@ function Shell() {
     [repo, status, branches, tags, stashes, remotes, hooks, refresh, exec, mutate, select]
   )
 
-  // Global shortcuts
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const mod = e.ctrlKey || e.metaKey
-      if (mod && e.key === 'o') {
-        e.preventDefault()
-        api.pickRepo().then((d) => { if (d) openRepo(d) })
-      } else if (mod && e.key === '`') {
-        e.preventDefault()
-        setConsoleOpen((o) => !o)
-      } else if (mod && e.key === ',') {
-        e.preventDefault()
-        setSettingsOpen(true)
-      } else if (e.key === 'F5' || (mod && e.key === 'r')) {
-        e.preventDefault()
-        refreshRef.current()
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [openRepo])
-
   if (booting) return <div className="app" />
 
   const commitMenu = (e: React.MouseEvent, c: Commit) => {
@@ -234,17 +310,12 @@ function Shell() {
       { label: 'Checkout (detached HEAD)', action: () => exec(() => api.checkout(c.sha)) },
       {
         label: 'Create branch here…',
-        action: async () => {
-          const r = await ui.ask({ title: 'Create branch', input: { label: 'Branch name' }, checkbox: { label: 'Check out after creating', checked: true }, confirmLabel: 'Create' })
-          if (r) exec(() => api.createBranch(r.value, c.sha, r.checked))
-        }
+        action: () =>
+          openPalette({ kind: 'input', placeholder: `New branch at ${c.sha.slice(0, 8)}`, submit: (name) => { exec(() => api.createBranch(name, c.sha, true)) } })
       },
       {
         label: 'Create tag here…',
-        action: async () => {
-          const r = await ui.ask({ title: 'Create tag', input: { label: 'Tag name' }, confirmLabel: 'Create' })
-          if (r) exec(() => api.createTag(r.value, c.sha))
-        }
+        action: () => openPalette({ kind: 'input', placeholder: `Tag name for ${c.sha.slice(0, 8)}`, submit: (name) => { exec(() => api.createTag(name, c.sha)) } })
       },
       { separator: true, label: '' },
       { label: 'Cherry-pick', action: () => exec(() => api.cherryPick(c.sha)) },
@@ -266,119 +337,35 @@ function Shell() {
     ])
   }
 
-  const push = async () => {
-    const cur = branches.find((b) => b.current)
-    if (!cur) return ui.toast('Not on a branch', true)
-    if (!cur.upstream) {
-      const r = await ui.ask({
-        title: `Push ${cur.name}`,
-        message: `${cur.name} has no upstream. Push to ${remotes[0]?.name ?? 'origin'} and set upstream?`,
-        confirmLabel: 'Push'
-      })
-      if (!r) return
-      return exec(() => api.push({ remote: remotes[0]?.name ?? 'origin', branch: cur.name, setUpstream: true }), 'Pushed')
-    }
-    exec(() => api.push({}), 'Pushed')
-  }
-
-  const current = branches.find((b) => b.current)
-
   return (
     <div className="app">
-      <div className="toolbar">
-        <img src={logo} className="logo" alt="" />
-        {repo ? (
-          <>
-            <span
-              className="repo-name"
-              title={repo.path}
-              onClick={async (e) => {
-                const recent = await api.recentRepos()
-                ui.menu(e, [
-                  ...recent.filter((r) => r.path !== repo.path).map((r) => ({ label: r.name, action: () => openRepo(r.path) })),
-                  { separator: true, label: '' },
-                  { label: 'Open repository…', action: () => api.pickRepo().then((d) => { if (d) openRepo(d) }) },
-                  { label: 'Show in file manager', action: () => api.openExternal(repo.path) },
-                  { label: 'Close repository', action: () => setRepo(null) }
-                ])
-              }}
-            >
-              {repo.name} ▾
-            </span>
-            <span className="branch-pill" title={current?.upstream ? `tracking ${current.upstream}` : ''}>
-              ⎇ {status?.detached ? 'detached HEAD' : status?.branch ?? '…'}
-              {status && (status.ahead > 0 || status.behind > 0) && (
-                <span className="mono dim">
-                  {status.ahead ? `↑${status.ahead}` : ''} {status.behind ? `↓${status.behind}` : ''}
-                </span>
-              )}
-            </span>
-            <span className="sep" />
-            <div className="tabs">
-              <button className={view === 'history' ? 'active' : ''} onClick={() => setView('history')}>History</button>
-              <button className={view === 'hooks' ? 'active' : ''} onClick={() => setView('hooks')}>
-                Hooks{hooks?.missingCommands.length ? ' ⚠' : ''}
-              </button>
-            </div>
-            <span className="grow" />
-            <button className="btn" disabled={!!activeRun} onClick={() => exec(() => api.fetch(), 'Fetched')}>Fetch</button>
-            <button className="btn" disabled={!!activeRun} onClick={() => exec(() => api.pull(), 'Pulled')}>
-              Pull {status?.behind ? <span className="badge">{status.behind}</span> : null}
-            </button>
-            <button className="btn" disabled={!!activeRun} onClick={push}>
-              Push {status?.ahead ? <span className="badge">{status.ahead}</span> : null}
-            </button>
-            <button
-              className="btn"
-              disabled={!!activeRun}
-              onClick={async () => {
-                const r = await ui.ask({ title: 'Stash changes', input: { label: 'Message (optional)', value: 'WIP' }, confirmLabel: 'Stash' })
-                if (r) exec(() => api.stash(r.value), 'Stashed')
-              }}
-            >
-              Stash
-            </button>
-            <button
-              className="btn"
-              onClick={async () => {
-                const r = await ui.ask({ title: 'New branch', input: { label: 'Branch name' }, confirmLabel: 'Create & checkout' })
-                if (r) exec(() => api.createBranch(r.value))
-              }}
-            >
-              Branch
-            </button>
-          </>
-        ) : (
-          <span className="grow" />
-        )}
-        <button className="btn ghost" title="Settings (Ctrl+,)" onClick={() => setSettingsOpen(true)}>⚙</button>
-      </div>
+      <TitleBar
+        repo={repo}
+        status={status}
+        onPalette={() => openPalette()}
+        onRepoMenu={() => recentPicker(depsRef.current).then(openPalette)}
+        onBranchMenu={() =>
+          openPalette(
+            branchPicker(depsRef.current, 'Checkout branch', (b) => { exec(() => (b.remote ? api.checkoutRemote(b.name) : api.checkout(b.name))) }, { excludeCurrent: true })
+          )
+        }
+      />
 
       {!repo || !ctx ? (
         <Welcome onOpen={openRepo} />
       ) : (
         <RepoContext.Provider value={ctx}>
           <div className="main">
-            <Sidebar
-              selected={selected}
-              view={view}
-              onSelectWorking={() => select('working')}
-              onShowHooks={() => setView('hooks')}
-            />
+            {sidebarOpen && (
+              <Sidebar selected={selected} view={view} onSelectWorking={() => select('working')} onShowHooks={() => setView('hooks')} />
+            )}
             <div className="center">
               {view === 'hooks' ? (
-                <HooksView onOpenSettings={() => setSettingsOpen(true)} />
+                <HooksView selected={hookSel} onSelect={setHookSel} onOpenSettings={() => setSettingsOpen(true)} />
               ) : (
                 <div className="split">
                   <div className="pane-list" style={{ width: `${listWidth}%` }}>
-                    <CommitList
-                      commits={log.commits}
-                      graph={log.graph}
-                      status={status}
-                      selected={selected}
-                      onSelect={setSelected}
-                      onContext={commitMenu}
-                    />
+                    <CommitList commits={log.commits} graph={log.graph} status={status} selected={selected} onSelect={setSelected} onContext={commitMenu} />
                   </div>
                   <div
                     className="resizer"
@@ -404,13 +391,16 @@ function Shell() {
         </RepoContext.Provider>
       )}
 
+      {palette && <Palette initial={palette} onClose={() => setPalette(null)} />}
+
       {settingsOpen && (
         <SettingsDialog
           onClose={() => setSettingsOpen(false)}
           onSaved={(s) => {
+            setTheme(s.theme)
             document.documentElement.dataset.theme = s.theme
             ui.toast('Settings saved')
-            refreshRef.current()
+            refreshRef.current(ALL)
           }}
         />
       )}

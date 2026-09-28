@@ -31,26 +31,67 @@ function send(channel: string, payload: unknown): void {
   win?.webContents.send('ody:event', channel, payload)
 }
 
+// Hook output can arrive in thousands of tiny chunks. Coalesce per run and flush at most
+// every 40ms so the renderer isn't flooded with IPC messages and re-renders.
+const outputBuffers = new Map<string, { stream: 'stdout' | 'stderr'; text: string }>()
+let outputTimer: NodeJS.Timeout | null = null
+function flushOutput(): void {
+  if (outputTimer) clearTimeout(outputTimer)
+  outputTimer = null
+  for (const [runId, b] of outputBuffers) send('output', { runId, stream: b.stream, text: b.text })
+  outputBuffers.clear()
+}
+
 const runner = new GitRunner({
   settings: getSettings,
   env: (extra) => buildEnv(getSettings(), extra),
   events: {
     runStart: (e) => send('runStart', e),
-    output: (e) => send('output', e),
-    hook: (e) => send('hook', e),
-    runEnd: (e) => send('runEnd', e)
+    output: (e) => {
+      const b = outputBuffers.get(e.runId)
+      if (b) b.text += e.text
+      else outputBuffers.set(e.runId, { stream: e.stream, text: e.text })
+      outputTimer ??= setTimeout(flushOutput, 40)
+    },
+    hook: (e) => {
+      flushOutput()
+      send('hook', e)
+    },
+    runEnd: (e) => {
+      flushOutput()
+      send('runEnd', e)
+    }
   }
 })
 
+/**
+ * Classifies file-system changes so the renderer only reloads what changed: worktree and
+ * index edits need just `git status`, ref moves need the log, hook edits need the hooks
+ * overview. Keeps big repos responsive while you type in your editor.
+ */
+function classify(f: string): 'status' | 'refs' | 'hooks' | null {
+  if (f.includes('node_modules/') || f.endsWith('.lock')) return null
+  if (!f.startsWith('.git/')) return 'status'
+  if (f.startsWith('.git/objects') || f.startsWith('.git/logs')) return null
+  if (f === '.git/index') return 'status'
+  if (f.startsWith('.git/hooks')) return 'hooks'
+  if (/^\.git\/(HEAD|refs|packed-refs|MERGE_HEAD|CHERRY_PICK_HEAD|REVERT_HEAD|rebase-|FETCH_HEAD|config)/.test(f)) return 'refs'
+  return null
+}
+
+let pendingScopes = new Set<string>()
 function watchRepo(root: string): void {
   watcher?.close()
   try {
     watcher = watch(root, { recursive: true }, (_evt, file) => {
-      const f = String(file ?? '').replace(/\\/g, '/')
-      if (f.includes('node_modules/') || f.startsWith('.git/objects') || f.endsWith('.lock')) return
-      if (f.startsWith('.git/') && !/^\.git\/(HEAD|index|refs|MERGE_HEAD|rebase-|FETCH_HEAD|packed-refs|hooks)/.test(f)) return
+      const scope = classify(String(file ?? '').replace(/\\/g, '/'))
+      if (!scope) return
+      pendingScopes.add(scope)
       if (changeTimer) clearTimeout(changeTimer)
-      changeTimer = setTimeout(() => send('repoChanged', { root }), 350)
+      changeTimer = setTimeout(() => {
+        send('repoChanged', { root, scopes: [...pendingScopes] })
+        pendingScopes = new Set()
+      }, 250)
     })
   } catch {
     watcher = null
@@ -63,7 +104,7 @@ async function openRepo(dir: string): Promise<{ path: string; name: string }> {
   hooks = new HookService(root, runner, () => envPath(getSettings()))
   addRecent(root)
   watchRepo(root)
-  win?.setTitle(`${root.split(/[\\/]/).pop()} — Odysseus`)
+  win?.setTitle(`${root.split(/[\\/]/).pop()} - Odysseus`)
   return { path: root, name: root.split(/[\\/]/).pop() ?? root }
 }
 
@@ -114,10 +155,15 @@ const api: Record<string, Handler> = {
   openExternal: (p: string) => shell.openPath(p),
   showInFolder: (p: string) => shell.showItemInFolder(p),
   cancelRun: (id: string) => runner.cancel(id),
+  platform: () => process.platform,
+  windowMinimize: () => win?.minimize(),
+  windowToggleMaximize: () => (win?.isMaximized() ? win.unmaximize() : win?.maximize()),
+  windowClose: () => win?.close(),
+  windowIsMaximized: () => win?.isMaximized() ?? false,
 
   // read
   status: () => requireRepo().status(),
-  log: (limit?: number) => requireRepo().log(limit),
+  log: (limit?: number, knownKey?: string) => requireRepo().log(limit, knownKey),
   commitDetail: (sha: string) => requireRepo().commitDetail(sha),
   diff: (src: DiffSource, context?: number) => requireRepo().diff(src, context),
   branches: () => requireRepo().branches(),
@@ -179,18 +225,26 @@ function createWindow(): void {
     height: 900,
     minWidth: 900,
     minHeight: 560,
-    backgroundColor: '#0d1017',
+    backgroundColor: '#0b0f17',
     title: 'Odysseus',
     icon: existsSync(iconPath) ? nativeImage.createFromPath(iconPath) : undefined,
-    autoHideMenuBar: true,
+    show: false,
+    // Custom title bar: frameless on Windows/Linux, inset traffic lights on macOS.
+    frame: false,
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
+    trafficLightPosition: { x: 14, y: 11 },
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       sandbox: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      spellcheck: false
     }
   })
+  win.once('ready-to-show', () => win?.show())
   win.on('focus', () => send('focus', null))
+  win.on('maximize', () => send('maximized', true))
+  win.on('unmaximize', () => send('maximized', false))
   if (process.env.ELECTRON_RENDERER_URL) win.loadURL(process.env.ELECTRON_RENDERER_URL)
   else win.loadFile(join(__dirname, '../renderer/index.html'))
 }

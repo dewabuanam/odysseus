@@ -43,9 +43,15 @@ export const api = {
   openExternal: (p: string) => call<string>('openExternal', p),
   showInFolder: (p: string) => call<void>('showInFolder', p),
   cancelRun: (id: string) => call<boolean>('cancelRun', id),
+  platform: () => call<string>('platform'),
+  windowMinimize: () => call<void>('windowMinimize'),
+  windowToggleMaximize: () => call<void>('windowToggleMaximize'),
+  windowClose: () => call<void>('windowClose'),
+  windowIsMaximized: () => call<boolean>('windowIsMaximized'),
 
   status: () => call<WorkingStatus>('status'),
-  log: (limit?: number) => call<{ commits: Commit[]; graph: GraphRow[] }>('log', limit),
+  log: (limit?: number, knownKey?: string) =>
+    call<{ key: string; unchanged?: boolean; commits: Commit[]; graph: GraphRow[] }>('log', limit, knownKey),
   commitDetail: (sha: string) => call<CommitDetail>('commitDetail', sha),
   diff: (src: DiffSource, context?: number) => call<FileDiff | null>('diff', src, context),
   branches: () => call<Branch[]>('branches'),
