@@ -2,26 +2,33 @@ import { useEffect, useState } from 'react'
 import type { RepoSummary, WorkingStatus } from '@shared/types'
 import { api } from '../api'
 import { formatKeys } from '../palette'
-import { useActiveRun } from '../runs'
+import { isRunActive, norm, useRuns } from '../runs'
 import logo from '../assets/logo.png'
 
 interface Props {
-  repo: RepoSummary | null
+  tabs: RepoSummary[]
+  active: string | null
   status: WorkingStatus | null
-  /** Superproject path when the open repo is a submodule */
+  /** Superproject path when the active repo is a submodule */
   parent: string | null
+  paletteKeys?: string
+  onSelectTab(path: string): void
+  onCloseTab(path: string): void
+  onNewTab(): void
   onParent(): void
   onPalette(): void
-  onRepoMenu(): void
   onBranchMenu(): void
 }
 
-/** Frameless window chrome: drag region, repo/branch switchers, palette trigger, window controls. */
-export function TitleBar({ repo, status, parent, onParent, onPalette, onRepoMenu, onBranchMenu }: Props) {
+/** Frameless window chrome: repository tabs, branch switcher, palette trigger, window controls. */
+export function TitleBar({ tabs, active, status, parent, paletteKeys, onSelectTab, onCloseTab, onNewTab, onParent, onPalette, onBranchMenu }: Props) {
   const [platform, setPlatform] = useState<string>('win32')
   const [maximized, setMaximized] = useState(false)
-  const activeRun = useActiveRun()
-  const runningHook = activeRun?.steps.find((s) => s.state === 'running')
+  const runs = useRuns()
+  const activeRuns = runs.filter((r) => active && norm(r.root) === norm(active))
+  const running = activeRuns.find(isRunActive)
+  const runningHook = running?.steps.find((s) => s.state === 'running')
+  const queuedCount = activeRuns.filter((r) => r.startedAt === undefined && r.endedAt === undefined).length
 
   useEffect(() => {
     api.platform().then(setPlatform)
@@ -31,24 +38,50 @@ export function TitleBar({ repo, status, parent, onParent, onPalette, onRepoMenu
 
   const mac = platform === 'darwin'
   const branch = status ? (status.detached ? 'detached HEAD' : status.branch ?? '') : ''
+  const busy = (path: string) => runs.some((r) => norm(r.root) === norm(path) && r.endedAt === undefined)
 
   return (
     <div className={`titlebar ${mac ? 'mac' : ''}`}>
       {!mac && <img src={logo} className="tb-logo" alt="" />}
-      {repo && (
+      <div className="tb-tabs">
+        {tabs.map((t) => (
+          <div
+            key={t.path}
+            className={`tb-tab ${t.path === active ? 'active' : ''}`}
+            title={t.path}
+            onMouseDown={(e) => {
+              if (e.button === 1) {
+                e.preventDefault()
+                onCloseTab(t.path)
+              }
+            }}
+            onClick={() => onSelectTab(t.path)}
+          >
+            {busy(t.path) && <span className="spinner tiny" />}
+            <span className="ellipsis">{t.name}</span>
+            <button
+              className="tb-tab-close"
+              aria-label={`Close ${t.name}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                onCloseTab(t.path)
+              }}
+            >
+              ×
+            </button>
+          </div>
+        ))}
+        <button className="tb-btn tb-newtab" onClick={onNewTab} title="Open repository in a new tab">
+          +
+        </button>
+      </div>
+      {active && (
         <>
           {parent && (
-            <>
-              <button className="tb-btn tb-parent" onClick={onParent} title={`Back to parent repository ${parent}`}>
-                {parent.split(/[\\/]/).pop()}
-              </button>
-              <span className="tb-slash">›</span>
-            </>
+            <button className="tb-btn tb-parent" onClick={onParent} title={`Parent repository ${parent}`}>
+              ↑ {parent.split(/[\\/]/).pop()}
+            </button>
           )}
-          <button className="tb-btn tb-repo" onClick={onRepoMenu} title={repo.path}>
-            {repo.name}
-          </button>
-          <span className="tb-slash">/</span>
           <button className="tb-btn tb-branch" onClick={onBranchMenu} title="Checkout branch">
             <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M5 3.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm0 9.5a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm7.25-7.75a.75.75 0 1 0 0-1.5.75.75 0 0 0 0 1.5ZM4.25 1a2.25 2.25 0 0 0-.75 4.37v5.26a2.25 2.25 0 1 0 1.5 0V9.8c.5.3 1.1.45 1.75.45h2.5a2.25 2.25 0 0 0 2.25-2.25v-.63a2.25 2.25 0 1 0-1.5 0v.63c0 .41-.34.75-.75.75h-2.5c-.97 0-1.75-.78-1.75-1.75V5.37A2.25 2.25 0 0 0 4.25 1Z" /></svg>
             {branch}
@@ -60,8 +93,11 @@ export function TitleBar({ repo, status, parent, onParent, onPalette, onRepoMenu
       <div className="tb-drag" />
       <button className="tb-search" onClick={onPalette}>
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6"><circle cx="7" cy="7" r="5" /><path d="m11 11 3.5 3.5" /></svg>
-        <span className="grow">{runningHook ? `Running ${runningHook.hook}…` : activeRun ? `${activeRun.title}…` : 'Search commands'}</span>
-        {activeRun ? <span className="spinner" /> : <kbd>{formatKeys('Mod+P')}</kbd>}
+        <span className="grow ellipsis">
+          {runningHook ? `Running ${runningHook.hook}…` : running ? `${running.title}…` : 'Search commands'}
+          {queuedCount > 0 && ` (+${queuedCount} queued)`}
+        </span>
+        {running ? <span className="spinner" /> : paletteKeys && <kbd>{formatKeys(paletteKeys)}</kbd>}
       </button>
       <div className="tb-drag" />
       {!mac && (

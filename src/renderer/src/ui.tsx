@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { parseAnsi } from './ansi'
 
 // ------------------------------------------------------------------ dialogs
@@ -17,12 +17,14 @@ export interface AskResult {
   checked: boolean
 }
 
-interface MenuItem {
+export interface MenuItem {
   label: string
   action?: () => void
   danger?: boolean
   separator?: boolean
   disabled?: boolean
+  /** Nested items, shown to the right on hover */
+  submenu?: MenuItem[]
 }
 
 interface UiApi {
@@ -77,30 +79,7 @@ export function UiProvider({ children }: { children: ReactNode }) {
           }}
         />
       )}
-      {menu && (
-        <div
-          className="ctx"
-          style={{ left: Math.min(menu.x, window.innerWidth - 210), top: Math.min(menu.y, window.innerHeight - menu.items.length * 30 - 10) }}
-        >
-          {menu.items.map((it, i) =>
-            it.separator ? (
-              <div key={i} className="ctx-sep" />
-            ) : (
-              <div
-                key={i}
-                className={`ctx-item ${it.danger ? 'danger' : ''}`}
-                style={it.disabled ? { opacity: 0.4, pointerEvents: 'none' } : undefined}
-                onClick={() => {
-                  setMenu(null)
-                  it.action?.()
-                }}
-              >
-                {it.label}
-              </div>
-            )
-          )}
-        </div>
-      )}
+      {menu && <MenuList items={menu.items} x={menu.x} y={menu.y} onDone={() => setMenu(null)} />}
       <div className="toasts">
         {toasts.map((t) => (
           <div key={t.id} className={`toast ${t.error ? 'error' : ''}`}>
@@ -248,3 +227,46 @@ echo "Running ${name}…"
 
 exit 0
 `
+
+function MenuList({ items, x, y, onDone }: { items: MenuItem[]; x: number; y: number; onDone(): void }) {
+  const [open, setOpen] = useState<number | null>(null)
+  const [openTop, setOpenTop] = useState(0)
+  const ref = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState({ left: x, top: y })
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    setPos({ left: Math.max(4, Math.min(x, window.innerWidth - r.width - 6)), top: Math.max(4, Math.min(y, window.innerHeight - r.height - 6)) })
+  }, [x, y])
+  return (
+    <div className="ctx" ref={ref} style={pos} onClick={(e) => e.stopPropagation()}>
+      {items.map((it, i) =>
+        it.separator ? (
+          <div key={i} className="ctx-sep" />
+        ) : (
+          <div
+            key={i}
+            className={`ctx-item ${it.danger ? 'danger' : ''} ${it.submenu ? 'has-sub' : ''} ${open === i ? 'open' : ''}`}
+            style={it.disabled ? { opacity: 0.4, pointerEvents: 'none' } : undefined}
+            onMouseEnter={(e) => {
+              setOpen(it.submenu ? i : null)
+              setOpenTop(e.currentTarget.offsetTop)
+            }}
+            onClick={() => {
+              if (it.submenu) return setOpen(i)
+              onDone()
+              it.action?.()
+            }}
+          >
+            <span className="grow">{it.label}</span>
+            {it.submenu && <span className="ctx-arrow">›</span>}
+            {it.submenu && open === i && (
+              <MenuList items={it.submenu} x={pos.left + (ref.current?.offsetWidth ?? 200) - 4} y={pos.top + openTop - 4} onDone={onDone} />
+            )}
+          </div>
+        )
+      )}
+    </div>
+  )
+}

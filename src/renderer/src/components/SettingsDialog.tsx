@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import type { EnvDiagnostics, Settings } from '@shared/types'
+import type { EnvDiagnostics, Keymap, Settings } from '@shared/types'
+import { KEYMAP_NAMES } from '../keymaps'
 import { api } from '../api'
 import { Modal } from '../ui'
 
@@ -65,6 +66,14 @@ export function SettingsDialog({ onClose, onSaved }: { onClose(): void; onSaved(
           <select className="input" value={s.theme} onChange={(e) => setS({ ...s, theme: e.target.value as Settings['theme'] })}>
             <option value="light">Paper</option>
             <option value="dark">Chalkboard</option>
+          </select>
+        </div>
+        <div className="field" style={{ width: 250 }}>
+          <span>Keymap</span>
+          <select className="input" value={s.keymap} onChange={(e) => setS({ ...s, keymap: e.target.value as Keymap })}>
+            {(Object.keys(KEYMAP_NAMES) as Keymap[]).map((k) => (
+              <option key={k} value={k}>{KEYMAP_NAMES[k]}</option>
+            ))}
           </select>
         </div>
       </div>

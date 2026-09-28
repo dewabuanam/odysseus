@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { CommandResult, FileChange, FileDiff } from '@shared/types'
-import { api, type DiffSource } from '../api'
+import { useApi, type DiffSource } from '../api'
 import { stripAnsi } from '../ansi'
-import { useRepo } from '../repoContext'
-import { runStore, useActiveRun } from '../runs'
+import { optimisticDiscard, optimisticResolve, optimisticStage, optimisticUnstage, useRepo } from '../repoContext'
+import { norm, runStore, useActiveRun } from '../runs'
 import { Ansi, fmtDuration, useTicker, useUi } from '../ui'
+import { ConflictView } from './ConflictView'
 import { DiffView } from './DiffView'
 import type { CommitAction } from '../commands'
 
@@ -41,6 +42,7 @@ function saveDraft(root: string, v: string) {
 export function WorkingPanel() {
   const repo = useRepo()
   const ui = useUi()
+  const api = useApi()
   const status = repo.status
   const [message, setMessage] = useState(() => loadDraft(repo.root))
   const [amend, setAmend] = useState(false)
@@ -51,7 +53,7 @@ export function WorkingPanel() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [diffs, setDiffs] = useState<Record<string, FileDiff | null>>({})
   const preAmendMessage = useRef<string | null>(null)
-  const activeRun = useActiveRun()
+  const activeRun = useActiveRun(repo.root)
   const now = useTicker(!!activeRun)
 
   useEffect(() => saveDraft(repo.root, message), [repo.root, message])
@@ -59,10 +61,13 @@ export function WorkingPanel() {
   const textRef = useRef<HTMLTextAreaElement>(null)
   const actionRef = useRef<(a: CommitAction) => void>(() => {})
   useEffect(() => {
-    const on = (e: Event) => actionRef.current((e as CustomEvent<CommitAction>).detail)
+    const on = (e: Event) => {
+      const d = (e as CustomEvent<{ root: string; action: CommitAction }>).detail
+      if (norm(d.root) === norm(repo.root)) actionRef.current(d.action)
+    }
     window.addEventListener('ody:commit', on)
     return () => window.removeEventListener('ody:commit', on)
-  }, [])
+  }, [repo.root])
 
   const keyOf = (area: Area, f: FileChange) => `${area}:${f.path}`
 
@@ -123,7 +128,9 @@ export function WorkingPanel() {
       api.discard(
         files.filter((f) => f.status !== '?').map((f) => f.path),
         files.filter((f) => f.status === '?').map((f) => f.path)
-      )
+      ),
+      ['status'],
+      optimisticDiscard(files.map((f) => f.path))
     )
   }
 
@@ -170,7 +177,7 @@ export function WorkingPanel() {
       preAmendMessage.current = null
       ui.toast(isAmend ? 'Commit amended' : 'Committed')
     } else if (!result.cancelled) {
-      const run = runStore.get()[0]
+      const run = runStore.get().find((r) => norm(r.root) === norm(repo.root) && r.endedAt !== undefined)
       setFailure({ result, output: run?.output ?? result.stderr + result.stdout, hook: result.failedHook, amend: isAmend })
     }
 
@@ -221,7 +228,7 @@ export function WorkingPanel() {
       const open = expanded.has(k)
       return (
         <div key={k}>
-          <div className="file-row" onClick={() => toggleExpand(area, f)} onDoubleClick={() => (area === 'staged' ? repo.mutate(() => api.unstage([f.path])) : repo.mutate(() => api.stage([f.path])))}>
+          <div className="file-row" onClick={() => toggleExpand(area, f)}>
             <span className="chev">{open ? '▾' : '▸'}</span>
             <span className={`st st-${f.status}`}>{f.status === '?' ? 'N' : f.status}</span>
             <span className="grow ellipsis" title={f.path}>
@@ -247,14 +254,21 @@ export function WorkingPanel() {
               {area === 'unstaged' && (
                 <>
                   <button className="btn small" onClick={() => discard([f])}>Discard</button>
-                  <button className="btn small" onClick={() => repo.mutate(() => api.stage([f.path]))}>Stage</button>
+                  <button className="btn small" onClick={() => repo.mutate(() => api.stage([f.path]), ['status'], optimisticStage([f.path]))}>Stage</button>
                 </>
               )}
-              {area === 'staged' && <button className="btn small" onClick={() => repo.mutate(() => api.unstage([f.path]))}>Unstage</button>}
-              {area === 'conflicted' && <button className="btn small" onClick={() => repo.mutate(() => api.stage([f.path]))}>Mark resolved</button>}
+              {area === 'staged' && <button className="btn small" onClick={() => repo.mutate(() => api.unstage([f.path]), ['status'], optimisticUnstage([f.path]))}>Unstage</button>}
+              {area === 'conflicted' && (
+                <>
+                  <button className="btn small" onClick={() => repo.mutate(() => api.resolveConflict(f.path, 'ours'), ['status'], optimisticResolve(f.path))}>{status.operation === 'rebasing' ? 'Use upstream' : 'Use ours'}</button>
+                  <button className="btn small" onClick={() => repo.mutate(() => api.resolveConflict(f.path, 'theirs'), ['status'], optimisticResolve(f.path))}>{status.operation === 'rebasing' ? 'Use mine' : 'Use theirs'}</button>
+                  <button className="btn small" onClick={() => repo.mutate(() => api.stage([f.path]), ['status'], optimisticResolve(f.path))}>Mark resolved</button>
+                </>
+              )}
             </span>
           </div>
-          {open && <DiffView diff={diffs[k]} loading={!(k in diffs)} mode={area === 'staged' ? 'staged' : 'unstaged'} onApply={area === 'conflicted' ? undefined : applyHunk(area, f)} />}
+          {open && area === 'conflicted' && <ConflictView path={f.path} />}
+          {open && area !== 'conflicted' && <DiffView diff={diffs[k]} loading={!(k in diffs)} mode={area === 'staged' ? 'staged' : 'unstaged'} onApply={applyHunk(area, f)} />}
         </div>
       )
     })
@@ -385,7 +399,7 @@ export function WorkingPanel() {
           <div className="section-head">
             <span className="grow">Unstaged ({status.unstaged.length})</span>
             <button className="btn small" onClick={() => discard(status.unstaged)}>Discard all</button>
-            <button className="btn small" onClick={() => repo.mutate(() => api.stageAll())}>Stage all</button>
+            <button className="btn small" onClick={() => repo.mutate(() => api.stageAll(), ['status'], optimisticStage('all'))}>Stage all</button>
           </div>
           {fileList('unstaged', status.unstaged)}
         </>
@@ -395,7 +409,7 @@ export function WorkingPanel() {
         <>
           <div className="section-head">
             <span className="grow">Staged ({status.staged.length})</span>
-            <button className="btn small" onClick={() => repo.mutate(() => api.unstageAll())}>Unstage all</button>
+            <button className="btn small" onClick={() => repo.mutate(() => api.unstageAll(), ['status'], optimisticUnstage('all'))}>Unstage all</button>
           </div>
           {fileList('staged', status.staged)}
         </>

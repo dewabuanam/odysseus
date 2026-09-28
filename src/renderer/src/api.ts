@@ -1,3 +1,4 @@
+import { createContext, useContext } from 'react'
 import type {
   Branch,
   CommandResult,
@@ -5,20 +6,22 @@ import type {
   CommitDetail,
   CommitOptions,
   EnvDiagnostics,
+  FetchOptions,
   FileDiff,
   GraphRow,
+  HistoryEntry,
   HookName,
   HooksOverview,
+  LogOptions,
+  MergeOptions,
+  PullOptions,
   PushOptions,
   Remote,
   RepoSummary,
   Settings,
   Stash,
-  Submodule,
-  FetchOptions,
-  MergeOptions,
-  PullOptions,
   StashOptions,
+  Submodule,
   Tag,
   WorkingStatus
 } from '@shared/types'
@@ -28,23 +31,28 @@ export type DiffSource =
   | { kind: 'staged'; path: string }
   | { kind: 'commit'; sha: string; path: string }
 
-const call = <T>(method: string, ...args: unknown[]): Promise<T> =>
-  window.ody.invoke<T>(method, ...args).catch((e: Error) => {
-    // Strip Electron's "Error invoking remote method 'x': Error: " prefix.
-    throw new Error(String(e.message).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))
-  })
+// Strip Electron's "Error invoking remote method 'x': Error: " prefix.
+const clean = (e: Error): never => {
+  throw new Error(String(e.message).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))
+}
 
+const call = <T>(method: string, ...args: unknown[]): Promise<T> => window.ody.invoke<T>(method, ...args).catch(clean)
+
+/** Application-level calls (no repository). */
 export const api = {
   getSettings: () => call<Settings>('getSettings'),
   setSettings: (p: Partial<Settings>) => call<Settings>('setSettings', p),
   diagnostics: () => call<EnvDiagnostics>('diagnostics'),
   recentRepos: () => call<RepoSummary[]>('recentRepos'),
   removeRecent: (p: string) => call<void>('removeRecent', p),
-  lastRepo: () => call<string | null>('lastRepo'),
+  getTabs: () => call<{ tabs: RepoSummary[]; active: string | null }>('getTabs'),
+  setTabs: (tabs: string[], active: string | null) => call<void>('setTabs', tabs, active),
   pickRepo: () => call<string | null>('pickRepo'),
   openRepo: (dir: string) => call<RepoSummary>('openRepo', dir),
+  closeRepo: (root: string) => call<void>('closeRepo', root),
   initRepo: () => call<RepoSummary | null>('initRepo'),
   cloneRepo: (url: string) => call<RepoSummary | null>('cloneRepo', url),
+  history: (root?: string, limit?: number) => call<HistoryEntry[]>('history', root, limit),
   openExternal: (p: string) => call<string>('openExternal', p),
   showInFolder: (p: string) => call<void>('showInFolder', p),
   cancelRun: (id: string) => call<boolean>('cancelRun', id),
@@ -52,61 +60,93 @@ export const api = {
   windowMinimize: () => call<void>('windowMinimize'),
   windowToggleMaximize: () => call<void>('windowToggleMaximize'),
   windowClose: () => call<void>('windowClose'),
-  windowIsMaximized: () => call<boolean>('windowIsMaximized'),
+  windowIsMaximized: () => call<boolean>('windowIsMaximized')
+}
 
-  status: () => call<WorkingStatus>('status'),
-  log: (limit?: number, knownKey?: string) =>
-    call<{ key: string; unchanged?: boolean; commits: Commit[]; graph: GraphRow[] }>('log', limit, knownKey),
-  commitDetail: (sha: string) => call<CommitDetail>('commitDetail', sha),
-  diff: (src: DiffSource, context?: number) => call<FileDiff | null>('diff', src, context),
-  branches: () => call<Branch[]>('branches'),
-  tags: () => call<Tag[]>('tags'),
-  stashes: () => call<Stash[]>('stashes'),
-  remotes: () => call<Remote[]>('remotes'),
-  lastCommitMessage: () => call<string>('lastCommitMessage'),
+/** Calls bound to one repository (one tab). */
+export function repoApi(root: string) {
+  const r = <T>(method: string, ...args: unknown[]): Promise<T> => window.ody.repo<T>(root, method, ...args).catch(clean)
+  return {
+    ...api,
+    root,
+    status: () => r<WorkingStatus>('status'),
+    log: (limit?: number, knownKey?: string, opts?: LogOptions) =>
+      r<{ key: string; unchanged?: boolean; commits: Commit[]; graph: GraphRow[] }>('log', limit, knownKey, opts),
+    logRef: (ref: string) => r<Commit[]>('logRef', ref),
+    commitDetail: (sha: string) => r<CommitDetail>('commitDetail', sha),
+    diff: (src: DiffSource, context?: number) => r<FileDiff | null>('diff', src, context),
+    branches: () => r<Branch[]>('branches'),
+    tags: () => r<Tag[]>('tags'),
+    stashes: () => r<Stash[]>('stashes'),
+    remotes: () => r<Remote[]>('remotes'),
+    lastCommitMessage: () => r<string>('lastCommitMessage'),
+    conflictContent: (path: string) => r<string>('conflictContent', path),
+    getHidden: () => r<string[]>('getHidden'),
+    identity: () => r<{ name: string; email: string }>('identity'),
+    setIdentity: (name: string, email: string, global: boolean) => r<void>('setIdentity', name, email, global),
+    setHidden: (refs: string[]) => r<string[]>('setHidden', refs),
 
-  stage: (paths: string[]) => call<void>('stage', paths),
-  stageAll: () => call<void>('stageAll'),
-  unstage: (paths: string[]) => call<void>('unstage', paths),
-  unstageAll: () => call<void>('unstageAll'),
-  discard: (paths: string[], untracked: string[]) => call<void>('discard', paths, untracked),
-  applyHunk: (file: FileDiff, hunk: number, lines: number[] | null, mode: 'stage' | 'unstage' | 'discard') =>
-    call<void>('applyHunk', file, hunk, lines, mode),
+    stage: (paths: string[]) => r<void>('stage', paths),
+    stageAll: () => r<void>('stageAll'),
+    unstage: (paths: string[]) => r<void>('unstage', paths),
+    unstageAll: () => r<void>('unstageAll'),
+    discard: (paths: string[], untracked: string[]) => r<void>('discard', paths, untracked),
+    applyHunk: (file: FileDiff, hunk: number, lines: number[] | null, mode: 'stage' | 'unstage' | 'discard') =>
+      r<void>('applyHunk', file, hunk, lines, mode),
+    resolveConflict: (path: string, side: 'ours' | 'theirs') => r<void>('resolveConflict', path, side),
 
-  commit: (o: CommitOptions) => call<CommandResult>('commit', o),
-  checkout: (ref: string) => call<CommandResult>('checkout', ref),
-  checkoutRemote: (ref: string) => call<CommandResult>('checkoutRemote', ref),
-  createBranch: (n: string, start?: string, checkout?: boolean) => call<CommandResult>('createBranch', n, start, checkout),
-  deleteBranch: (n: string, force?: boolean) => call<CommandResult>('deleteBranch', n, force),
-  merge: (ref: string, opts?: MergeOptions) => call<CommandResult>('merge', ref, opts),
-  rebase: (onto: string, autostash?: boolean) => call<CommandResult>('rebase', onto, autostash),
-  abortOperation: (op: string) => call<CommandResult>('abortOperation', op),
-  continueOperation: (op: string) => call<CommandResult>('continueOperation', op),
-  cherryPick: (sha: string) => call<CommandResult>('cherryPick', sha),
-  revert: (sha: string) => call<CommandResult>('revert', sha),
-  reset: (sha: string, mode: 'soft' | 'mixed' | 'hard') => call<CommandResult>('reset', sha, mode),
-  createTag: (n: string, sha: string, m?: string) => call<CommandResult>('createTag', n, sha, m),
-  deleteTag: (n: string) => call<CommandResult>('deleteTag', n),
-  fetch: (o?: FetchOptions) => call<CommandResult>('fetch', o),
-  pull: (o?: PullOptions) => call<CommandResult>('pull', o),
-  push: (o: PushOptions) => call<CommandResult>('push', o),
-  stash: (o?: StashOptions | string) => call<CommandResult>('stash', o),
-  stashApply: (ref: string, pop: boolean) => call<CommandResult>('stashApply', ref, pop),
-  stashDrop: (ref: string) => call<CommandResult>('stashDrop', ref),
+    commit: (o: CommitOptions) => r<CommandResult>('commit', o),
+    checkout: (ref: string) => r<CommandResult>('checkout', ref),
+    checkoutRemote: (ref: string) => r<CommandResult>('checkoutRemote', ref),
+    createBranch: (n: string, start?: string, checkout?: boolean) => r<CommandResult>('createBranch', n, start, checkout),
+    deleteBranch: (n: string, force?: boolean) => r<CommandResult>('deleteBranch', n, force),
+    renameBranch: (from: string, to: string) => r<CommandResult>('renameBranch', from, to),
+    setUpstream: (b: string, u: string) => r<CommandResult>('setUpstream', b, u),
+    unsetUpstream: (b: string) => r<CommandResult>('unsetUpstream', b),
+    deleteRemoteBranch: (ref: string) => r<CommandResult>('deleteRemoteBranch', ref),
+    merge: (ref: string, opts?: MergeOptions) => r<CommandResult>('merge', ref, opts),
+    rebase: (onto: string, autostash?: boolean) => r<CommandResult>('rebase', onto, autostash),
+    abortOperation: (op: string) => r<CommandResult>('abortOperation', op),
+    continueOperation: (op: string) => r<CommandResult>('continueOperation', op),
+    cherryPick: (sha: string) => r<CommandResult>('cherryPick', sha),
+    revert: (sha: string) => r<CommandResult>('revert', sha),
+    reset: (sha: string, mode: 'soft' | 'mixed' | 'hard') => r<CommandResult>('reset', sha, mode),
+    rewordCommit: (sha: string, message: string) => r<CommandResult>('rewordCommit', sha, message),
+    dropCommit: (sha: string) => r<CommandResult>('dropCommit', sha),
+    createTag: (n: string, sha: string, m?: string) => r<CommandResult>('createTag', n, sha, m),
+    deleteTag: (n: string) => r<CommandResult>('deleteTag', n),
+    fetch: (o?: FetchOptions) => r<CommandResult>('fetch', o),
+    pull: (o?: PullOptions) => r<CommandResult>('pull', o),
+    push: (o: PushOptions) => r<CommandResult>('push', o),
+    stash: (o?: StashOptions | string) => r<CommandResult>('stash', o),
+    stashApply: (ref: string, pop: boolean) => r<CommandResult>('stashApply', ref, pop),
+    stashDrop: (ref: string) => r<CommandResult>('stashDrop', ref),
 
-  hooksOverview: () => call<HooksOverview>('hooksOverview'),
-  readHook: (n: HookName) => call<string>('readHook', n),
-  writeHook: (n: HookName, c: string) => call<void>('writeHook', n, c),
-  setHookEnabled: (n: HookName, e: boolean) => call<void>('setHookEnabled', n, e),
-  removeHook: (n: HookName) => call<void>('removeHook', n),
-  makeHookExecutable: (n: HookName) => call<void>('makeHookExecutable', n),
-  runHook: (n: HookName, msg?: string) => call<CommandResult>('runHook', n, msg),
+    submodules: () => r<Submodule[]>('submodules'),
+    superproject: () => r<string | null>('superproject'),
+    submoduleUpdate: (paths?: string[], o?: { init?: boolean; remote?: boolean }) => r<CommandResult>('submoduleUpdate', paths, o),
+    submoduleSync: () => r<CommandResult>('submoduleSync'),
+    submoduleAdd: (url: string, path: string, branch?: string) => r<CommandResult>('submoduleAdd', url, path, branch),
+    submoduleDeinit: (path: string) => r<CommandResult>('submoduleDeinit', path),
+    submodulePath: (path: string) => r<string>('submodulePath', path),
 
-  submodules: () => call<Submodule[]>('submodules'),
-  superproject: () => call<string | null>('superproject'),
-  submoduleUpdate: (paths?: string[], o?: { init?: boolean; remote?: boolean }) => call<CommandResult>('submoduleUpdate', paths, o),
-  submoduleSync: () => call<CommandResult>('submoduleSync'),
-  submoduleAdd: (url: string, path: string, branch?: string) => call<CommandResult>('submoduleAdd', url, path, branch),
-  submoduleDeinit: (path: string) => call<CommandResult>('submoduleDeinit', path),
-  submodulePath: (path: string) => call<string>('submodulePath', path)
+    hooksOverview: () => r<HooksOverview>('hooksOverview'),
+    readHook: (n: HookName) => r<string>('readHook', n),
+    writeHook: (n: HookName, c: string) => r<void>('writeHook', n, c),
+    setHookEnabled: (n: HookName, e: boolean) => r<void>('setHookEnabled', n, e),
+    removeHook: (n: HookName) => r<void>('removeHook', n),
+    makeHookExecutable: (n: HookName) => r<void>('makeHookExecutable', n),
+    runHook: (n: HookName, msg?: string) => r<CommandResult>('runHook', n, msg)
+  }
+}
+
+export type RepoApi = ReturnType<typeof repoApi>
+
+export const ApiContext = createContext<RepoApi | null>(null)
+
+/** The API bound to the repository of the tab this component lives in. */
+export function useApi(): RepoApi {
+  const a = useContext(ApiContext)
+  if (!a) throw new Error('ApiContext missing')
+  return a
 }

@@ -9,6 +9,7 @@ import type {
   CommitOptions,
   FetchOptions,
   FileDiff,
+  LogOptions,
   MergeOptions,
   PullOptions,
   StashOptions,
@@ -55,21 +56,24 @@ export class GitRepo {
     return this.git.data(this.root, args, opts)
   }
 
-  private run(title: string, args: string[], input?: string): Promise<CommandResult> {
-    return this.git.run(this.root, args, { title, input })
+  private run(title: string, args: string[], input?: string, env?: NodeJS.ProcessEnv): Promise<CommandResult> {
+    return this.git.run(this.root, args, { title, input, env, queueKey: this.root })
   }
 
+  /** Index-changing writes: silent, but queued behind any running command. */
+  private write(args: string[], opts?: { input?: string; allowExit?: number[] }): Promise<string> {
+    return this.git.mutate(this.root, args, opts)
+  }
+
+  /** Reads HEAD straight from disk: no process spawn. */
   async hasHead(): Promise<boolean> {
-    try {
-      await this.data(['rev-parse', '--verify', '-q', 'HEAD'])
-      return true
-    } catch {
-      return false
-    }
+    return readSubmoduleHead(this.root) !== null
   }
 
+  private gitDirCache: string | null = null
   async gitDir(): Promise<string> {
-    return (await this.data(['rev-parse', '--absolute-git-dir'])).trim()
+    this.gitDirCache ??= (await this.data(['rev-parse', '--absolute-git-dir'])).trim()
+    return this.gitDirCache
   }
 
   // ---------------------------------------------------------------- read
@@ -89,38 +93,38 @@ export class GitRepo {
   private logCache: { key: string; commits: Commit[]; graph: GraphRow[] } | null = null
 
   /**
-   * Cheap fingerprint of every ref + HEAD. The full log and graph layout are only recomputed
-   * (and only sent over IPC) when this changes.
+   * Cheap fingerprint of every ref + HEAD + view options. The full log and graph layout are
+   * only recomputed (and only sent over IPC) when this changes.
    */
-  private async refsKey(limit: number): Promise<string> {
+  private async refsKey(limit: number, opts: LogOptions): Promise<string> {
     const [refs, head] = await Promise.all([
       this.data(['for-each-ref', '--format=%(objectname) %(refname)']),
       this.data(['rev-parse', '-q', '--verify', 'HEAD'], { allowExit: [1] })
     ])
-    return `${limit}\n${head.trim()}\n${refs}`
+    return `${limit}\n${head.trim()}\n${JSON.stringify(opts)}\n${refs}`
   }
 
   async log(
     limit = 3000,
-    knownKey?: string
+    knownKey?: string,
+    opts: LogOptions = {}
   ): Promise<{ key: string; unchanged?: boolean; commits: Commit[]; graph: GraphRow[] }> {
-    const key = await this.refsKey(limit)
+    const key = await this.refsKey(limit, opts)
     if (knownKey === key) return { key, unchanged: true, commits: [], graph: [] }
     if (this.logCache?.key === key) return this.logCache
     const head = key.split('\n')[1]
-    const hasRefs = key.split('\n').slice(2).join('').trim() !== ''
+    const hasRefs = key.split('\n').slice(3).join('').trim() !== ''
     if (!head && !hasRefs) return { key, commits: [], graph: [] }
+    // Hidden branches: --exclude applies to the --branches / --remotes that follows it, with
+    // patterns relative to refs/heads/ and refs/remotes/.
+    const hidden = opts.hidden ?? []
+    const exLocal = hidden.filter((r) => r.startsWith('refs/heads/')).map((r) => `--exclude=${r.slice(11)}`)
+    const exRemote = hidden.filter((r) => r.startsWith('refs/remotes/')).map((r) => `--exclude=${r.slice(13)}`)
+    const revs = opts.only
+      ? [opts.only]
+      : [...exLocal, '--branches', ...exRemote, '--remotes', '--tags', ...(head ? ['HEAD'] : [])]
     const [out, remotes] = await Promise.all([
-      this.data([
-        'log',
-        '--branches',
-        '--remotes',
-        '--tags',
-        ...(head ? ['HEAD'] : []),
-        '--topo-order',
-        `--max-count=${limit}`,
-        `--format=${LOG_FORMAT}`
-      ]),
+      this.data(['log', ...revs, '--topo-order', `--max-count=${limit}`, `--format=${LOG_FORMAT}`, '--']),
       this.remotes()
     ])
     const remoteNames = remotes.map((r) => r.name + '/')
@@ -227,27 +231,27 @@ export class GitRepo {
   // ---------------------------------------------------------------- index
 
   async stage(paths: string[]): Promise<void> {
-    if (paths.length) await this.data(['add', '-A', '--', ...paths])
+    if (paths.length) await this.write(['add', '-A', '--', ...paths])
   }
 
   async stageAll(): Promise<void> {
-    await this.data(['add', '-A'])
+    await this.write(['add', '-A'])
   }
 
   async unstage(paths: string[]): Promise<void> {
     if (!paths.length) return
-    if (await this.hasHead()) await this.data(['restore', '--staged', '--', ...paths])
-    else await this.data(['rm', '--cached', '-r', '-q', '--', ...paths])
+    if (await this.hasHead()) await this.write(['restore', '--staged', '--', ...paths])
+    else await this.write(['rm', '--cached', '-r', '-q', '--', ...paths])
   }
 
   async unstageAll(): Promise<void> {
-    if (await this.hasHead()) await this.data(['reset', '-q'])
-    else await this.data(['rm', '--cached', '-r', '-q', '.'])
+    if (await this.hasHead()) await this.write(['reset', '-q'])
+    else await this.write(['rm', '--cached', '-r', '-q', '.'])
   }
 
   async discard(paths: string[], untracked: string[]): Promise<void> {
-    if (paths.length) await this.data(['restore', '--worktree', '--', ...paths])
-    if (untracked.length) await this.data(['clean', '-f', '-q', '--', ...untracked])
+    if (paths.length) await this.write(['restore', '--worktree', '--', ...paths])
+    if (untracked.length) await this.write(['clean', '-f', '-q', '--', ...untracked])
   }
 
   /**
@@ -268,7 +272,7 @@ export class GitRepo {
     if (mode !== 'discard') args.push('--cached')
     if (reverse) args.push('--reverse')
     args.push('-')
-    await this.data(args, { input: patch })
+    await this.write(args, { input: patch })
   }
 
   // ---------------------------------------------------------------- write (hook-aware)
@@ -391,6 +395,122 @@ export class GitRepo {
     return this.run('Stash', args)
   }
 
+  // ---------------------------------------------------------------- identity
+
+  async identity(): Promise<{ name: string; email: string }> {
+    const get = (k: string) => this.data(['config', '--get', k], { allowExit: [1] }).then((v) => v.trim())
+    const [name, email] = await Promise.all([get('user.name'), get('user.email')])
+    return { name, email }
+  }
+
+  async setIdentity(name: string, email: string, global: boolean): Promise<void> {
+    const scope = global ? ['--global'] : []
+    await this.data(['config', ...scope, 'user.name', name])
+    await this.data(['config', ...scope, 'user.email', email])
+  }
+
+  // ---------------------------------------------------------------- branch management
+
+  renameBranch(from: string, to: string): Promise<CommandResult> {
+    return this.run(`Rename ${from} to ${to}`, ['branch', '-m', from, to])
+  }
+
+  setUpstream(branch: string, upstream: string): Promise<CommandResult> {
+    return this.run(`Set upstream of ${branch}`, ['branch', `--set-upstream-to=${upstream}`, branch])
+  }
+
+  unsetUpstream(branch: string): Promise<CommandResult> {
+    return this.run(`Unset upstream of ${branch}`, ['branch', '--unset-upstream', branch])
+  }
+
+  async deleteRemoteBranch(remoteRef: string): Promise<CommandResult> {
+    const remotes = (await this.remotes()).map((r) => r.name).sort((a, b) => b.length - a.length)
+    const remote = remotes.find((r) => remoteRef.startsWith(r + '/')) ?? remoteRef.split('/')[0]
+    const branch = remoteRef.slice(remote.length + 1)
+    return this.run(`Delete ${remoteRef}`, ['push', remote, '--delete', branch])
+  }
+
+  /** Commits reachable from one ref, for "Search…" on a branch. */
+  async logRef(ref: string, limit = 3000): Promise<Commit[]> {
+    return parseLog(await this.data(['log', ref, '--topo-order', `--max-count=${limit}`, `--format=${LOG_FORMAT}`, '--']))
+  }
+
+  // ---------------------------------------------------------------- history editing
+
+  /**
+   * Runs a non-interactive `git rebase -i`: a tiny script rewrites the todo list (reword / drop
+   * one commit) and another supplies the new message, so hooks (pre-rebase, post-rewrite)
+   * still run exactly as they would in a terminal.
+   */
+  private async scriptedRebase(sha: string, action: 'reword' | 'drop', message?: string): Promise<CommandResult> {
+    const dir = mkdtempSync(join(tmpdir(), 'odysseus-rebase-'))
+    const seq = join(dir, 'seq.js')
+    const ed = join(dir, 'msg.js')
+    const msgFile = join(dir, 'message.txt')
+    writeFileSync(
+      seq,
+      `const fs=require('fs');const f=process.argv[process.argv.length-1];const sha=${JSON.stringify(sha)};
+let done=false;const out=fs.readFileSync(f,'utf8').split('\\n').map(l=>{const m=l.match(/^pick ([0-9a-f]+)(.*)$/);
+if(!done&&m&&sha.startsWith(m[1])){done=true;return '${action} '+m[1]+m[2]}return l});fs.writeFileSync(f,out.join('\\n'))`
+    )
+    writeFileSync(ed, `const fs=require('fs');fs.writeFileSync(process.argv[process.argv.length-1],fs.readFileSync(${JSON.stringify(msgFile)},'utf8'))`)
+    writeFileSync(msgFile, (message ?? '') + '\n')
+    const node = `"${process.execPath.replace(/\\/g, '/')}"`
+    const q = (p: string) => `"${p.replace(/\\/g, '/')}"`
+    const parents = (await this.data(['rev-list', '--parents', '-n', '1', sha])).trim().split(' ')
+    const base = parents.length > 1 ? [`${sha}^`] : ['--root']
+    try {
+      return await this.run(
+        action === 'reword' ? `Edit message of ${sha.slice(0, 7)}` : `Drop ${sha.slice(0, 7)}`,
+        ['rebase', '-i', '--autostash', ...base],
+        undefined,
+        {
+          ELECTRON_RUN_AS_NODE: '1',
+          GIT_SEQUENCE_EDITOR: `${node} ${q(seq)}`,
+          GIT_EDITOR: `${node} ${q(ed)}`
+        }
+      )
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+
+  async rewordCommit(sha: string, message: string): Promise<CommandResult> {
+    const head = readSubmoduleHead(this.root)
+    if (head && head === sha) {
+      const dir = mkdtempSync(join(tmpdir(), 'odysseus-msg-'))
+      const f = join(dir, 'MSG')
+      writeFileSync(f, message + '\n')
+      try {
+        // --only with no paths: change the message, ignore whatever is staged.
+        return await this.run('Edit commit message', ['commit', '--amend', '--only', '--cleanup=strip', '-F', f])
+      } finally {
+        rmSync(dir, { recursive: true, force: true })
+      }
+    }
+    return this.scriptedRebase(sha, 'reword', message)
+  }
+
+  dropCommit(sha: string): Promise<CommandResult> {
+    return this.scriptedRebase(sha, 'drop')
+  }
+
+  // ---------------------------------------------------------------- conflicts
+
+  /** Resolve a conflicted file by taking one side wholesale, then mark it resolved. */
+  async resolveConflict(path: string, side: 'ours' | 'theirs'): Promise<void> {
+    await this.write(['checkout', `--${side}`, '--', path])
+    await this.write(['add', '--', path])
+  }
+
+  conflictContent(path: string): string {
+    try {
+      return readFileSync(join(this.root, path), 'utf8')
+    } catch {
+      return ''
+    }
+  }
+
   // ---------------------------------------------------------------- submodules
 
   /**
@@ -398,7 +518,7 @@ export class GitRepo {
    * seconds on Windows. Instead: parse .gitmodules, read recorded commits with one
    * `git ls-files --stage`, and read each checked-out commit straight from its HEAD file.
    */
-  async submodules(): Promise<Submodule[]> {
+  async submodules(depth = 0, prefix = ''): Promise<Submodule[]> {
     const modulesFile = join(this.root, '.gitmodules')
     if (!existsSync(modulesFile)) return []
     const entries = parseGitmodules(readFileSync(modulesFile, 'utf8'))
@@ -414,15 +534,22 @@ export class GitRepo {
       recorded.set(m[3], { sha: m[2] === '0' ? m[1] : prev?.sha ?? m[1], conflict: m[2] !== '0' || !!prev?.conflict })
     }
 
-    return entries.map((e) => {
+    const out: Submodule[] = []
+    for (const e of entries) {
       const rec = recorded.get(e.path)
       const head = readSubmoduleHead(join(this.root, e.path))
       let state: Submodule['state'] = 'ok'
       if (rec?.conflict) state = 'conflict'
       else if (!head) state = 'uninitialized'
       else if (rec && head !== rec.sha) state = 'modified'
-      return { name: e.name, path: e.path, url: e.url ?? '', branch: e.branch, sha: head ?? rec?.sha ?? '', state }
-    })
+      out.push({ name: e.name, path: prefix + e.path, url: e.url ?? '', branch: e.branch, sha: head ?? rec?.sha ?? '', state, depth })
+      // Nested submodules (a submodule's own .gitmodules), a few levels deep.
+      if (head && depth < 3 && existsSync(join(this.root, e.path, '.gitmodules'))) {
+        const inner = new GitRepo(join(this.root, e.path), this.git)
+        out.push(...(await inner.submodules(depth + 1, prefix + e.path + '/').catch(() => [])))
+      }
+    }
+    return out
   }
 
   async superproject(): Promise<string | null> {

@@ -2,7 +2,7 @@
 // Run with: npm test
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, chmodSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { HookEvent, Settings } from '../src/shared/types'
@@ -39,6 +39,7 @@ const runner = new GitRunner({
       ...extra
     }),
   events: {
+    runQueued: () => {},
     runStart: () => {},
     output: (e) => (output += e.text),
     hook: (e) => hookEvents.push(e),
@@ -383,6 +384,165 @@ async function main() {
     await repo.unstageAll()
     sh(dir, 'checkout', '--', 'a.txt')
     await repo.stashApply('stash@{0}', true)
+  })
+
+  await test('queue: commands run strictly in order, never concurrently', async () => {
+    const order: string[] = []
+    let running = 0
+    let maxRunning = 0
+    const q = new GitRunner({
+      settings: () => settings,
+      env: (extra) => buildEnv(settings, extra),
+      events: {
+        runQueued: (e) => order.push(`queued:${e.title}`),
+        runStart: (e) => {
+          running++
+          maxRunning = Math.max(maxRunning, running)
+          order.push(`start:${e.title}`)
+        },
+        output: () => {},
+        hook: () => {},
+        runEnd: () => running--
+      }
+    })
+    // pull-like slow command, checkout, slow, checkout, slow — fired without awaiting
+    writeHook(dir, 'post-checkout', 'sleep 1')
+    const slow = (t: string) => q.run(dir, ['hook', 'run', 'post-checkout', '--', 'HEAD', 'HEAD', '1'], { title: t })
+    const results = await Promise.all([
+      slow('pull 1'),
+      q.run(dir, ['checkout', '-q', 'feature/x'], { title: 'checkout feature' }),
+      slow('pull 2'),
+      q.run(dir, ['checkout', '-q', 'main'], { title: 'checkout main' }),
+      slow('pull 3')
+    ])
+    rmSync(join(dir, '.git', 'hooks', 'post-checkout'), { force: true })
+    assert.ok(results.every((r) => r.ok), results.map((r) => r.stderr).join('\n'))
+    assert.equal(maxRunning, 1, 'never more than one command at a time')
+    assert.deepEqual(
+      order.filter((o) => o.startsWith('start:')),
+      ['start:pull 1', 'start:checkout feature', 'start:pull 2', 'start:checkout main', 'start:pull 3']
+    )
+    assert.equal((await repo.status()).branch, 'main')
+  })
+
+  await test('queue: cancelling a queued command skips it', async () => {
+    writeHook(dir, 'post-checkout', 'sleep 1')
+    const first = runner.run(dir, ['hook', 'run', 'post-checkout', '--', 'HEAD', 'HEAD', '1'], { title: 'slow' })
+    const second = runner.run(dir, ['checkout', '-q', 'feature/x'], { title: 'queued checkout', runId: 'queued-1' })
+    assert.ok(runner.cancel('queued-1'))
+    const [a, b] = await Promise.all([first, second])
+    rmSync(join(dir, '.git', 'hooks', 'post-checkout'), { force: true })
+    assert.ok(a.ok)
+    assert.equal(b.cancelled, true)
+    assert.equal((await repo.status()).branch, 'main', 'cancelled checkout never ran')
+  })
+
+  await test('merge conflict: detected, resolved with a side, continued', async () => {
+    sh(dir, 'checkout', '-q', '-b', 'conflict-a')
+    writeFileSync(join(dir, 'conflict.txt'), 'base\n')
+    sh(dir, 'add', '.')
+    sh(dir, 'commit', '-qm', 'base')
+    sh(dir, 'checkout', '-q', '-b', 'conflict-b')
+    writeFileSync(join(dir, 'conflict.txt'), 'theirs\n')
+    sh(dir, 'commit', '-qam', 'b side')
+    sh(dir, 'checkout', '-q', 'conflict-a')
+    writeFileSync(join(dir, 'conflict.txt'), 'ours\n')
+    sh(dir, 'commit', '-qam', 'a side')
+
+    let r = await repo.merge('conflict-b')
+    assert.equal(r.ok, false)
+    let s = await repo.status()
+    assert.equal(s.operation, 'merging')
+    assert.deepEqual(s.conflicted.map((f) => f.path), ['conflict.txt'])
+    assert.match(repo.conflictContent('conflict.txt'), /<<<<<<<[\s\S]*=======[\s\S]*>>>>>>>/)
+
+    await repo.resolveConflict('conflict.txt', 'theirs')
+    s = await repo.status()
+    assert.equal(s.conflicted.length, 0)
+    assert.equal(readFileSync(join(dir, 'conflict.txt'), 'utf8'), 'theirs\n')
+    r = await repo.continueOperation('merging')
+    assert.ok(r.ok, r.stderr)
+    assert.equal((await repo.status()).operation, null)
+    assert.equal(sh(dir, 'rev-list', '--parents', '-n', '1', 'HEAD').trim().split(' ').length, 3, 'merge commit created')
+  })
+
+  await test('merge conflict: abort restores the branch', async () => {
+    sh(dir, 'checkout', '-q', '-b', 'conflict-c', 'conflict-b~1')
+    writeFileSync(join(dir, 'conflict.txt'), 'other\n')
+    sh(dir, 'commit', '-qam', 'c side')
+    const before = sh(dir, 'rev-parse', 'HEAD').trim()
+    const r = await repo.merge('conflict-b')
+    assert.equal(r.ok, false)
+    assert.equal((await repo.status()).operation, 'merging')
+    const a = await repo.abortOperation('merging')
+    assert.ok(a.ok, a.stderr)
+    assert.equal((await repo.status()).operation, null)
+    assert.equal(sh(dir, 'rev-parse', 'HEAD').trim(), before)
+  })
+
+  await test('rebase conflict: detected, resolved by editing, continued', async () => {
+    sh(dir, 'checkout', '-q', 'conflict-c')
+    let r = await repo.rebase('conflict-b')
+    assert.equal(r.ok, false)
+    let s = await repo.status()
+    assert.equal(s.operation, 'rebasing')
+    assert.equal(s.conflicted.length, 1)
+    writeFileSync(join(dir, 'conflict.txt'), 'hand merged\n')
+    await repo.stage(['conflict.txt'])
+    r = await repo.continueOperation('rebasing')
+    assert.ok(r.ok, r.stderr + r.stdout)
+    s = await repo.status()
+    assert.equal(s.operation, null)
+    assert.equal(readFileSync(join(dir, 'conflict.txt'), 'utf8'), 'hand merged\n')
+    assert.equal(sh(dir, 'merge-base', '--is-ancestor', 'conflict-b', 'HEAD'), '')
+  })
+
+  await test('rebase conflict: abort', async () => {
+    sh(dir, 'checkout', '-q', '-b', 'conflict-d', 'conflict-b~1')
+    writeFileSync(join(dir, 'conflict.txt'), 'd side\n')
+    sh(dir, 'commit', '-qam', 'd side')
+    const r = await repo.rebase('conflict-b')
+    assert.equal(r.ok, false)
+    const a = await repo.abortOperation('rebasing')
+    assert.ok(a.ok, a.stderr)
+    assert.equal((await repo.status()).operation, null)
+    assert.equal((await repo.status()).branch, 'conflict-d')
+  })
+
+  await test('edit history: reword HEAD and an older commit, drop a commit', async () => {
+    sh(dir, 'checkout', '-q', '-b', 'history', 'main')
+    for (const n of ['one', 'two', 'three']) {
+      writeFileSync(join(dir, `${n}.txt`), n + '\n')
+      sh(dir, 'add', '.')
+      sh(dir, 'commit', '-qm', n)
+    }
+    const head = sh(dir, 'rev-parse', 'HEAD').trim()
+    let r = await repo.rewordCommit(head, 'three (edited)')
+    assert.ok(r.ok, r.stderr)
+    assert.equal(sh(dir, 'log', '-1', '--format=%s').trim(), 'three (edited)')
+
+    const older = sh(dir, 'rev-parse', 'HEAD~2').trim()
+    r = await repo.rewordCommit(older, 'one (edited)')
+    assert.ok(r.ok, r.stderr + r.stdout)
+    assert.deepEqual(sh(dir, 'log', '-3', '--format=%s').trim().split('\n'), ['three (edited)', 'two', 'one (edited)'])
+
+    const two = sh(dir, 'rev-parse', 'HEAD~1').trim()
+    r = await repo.dropCommit(two)
+    assert.ok(r.ok, r.stderr + r.stdout)
+    assert.deepEqual(sh(dir, 'log', '-2', '--format=%s').trim().split('\n'), ['three (edited)', 'one (edited)'])
+    assert.ok(!existsSync(join(dir, 'two.txt')))
+  })
+
+  await test('branch management and hidden branches in the log', async () => {
+    let r = await repo.renameBranch('history', 'history-renamed')
+    assert.ok(r.ok, r.stderr)
+    const all = await repo.log(3000, undefined, {})
+    const hiddenView = await repo.log(3000, undefined, { hidden: ['refs/heads/conflict-d', 'refs/heads/conflict-c'] })
+    assert.ok(hiddenView.commits.length < all.commits.length, 'hidden branches drop their commits')
+    assert.ok(!hiddenView.commits.some((c) => c.subject === 'd side'))
+    const only = await repo.log(3000, undefined, { only: 'conflict-d' })
+    assert.ok(only.commits.some((c) => c.subject === 'd side'))
+    assert.ok(!only.commits.some((c) => c.subject === 'three (edited)'))
   })
 
   rmSync(dir, { recursive: true, force: true })

@@ -1,12 +1,17 @@
 import { app } from 'electron'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
-import type { RepoSummary, Settings } from '@shared/types'
+import type { HistoryEntry, RepoSummary, Settings } from '@shared/types'
 
 interface StoreData {
   settings: Settings
   recentRepos: string[]
   lastRepo: string | null
+  /** Open repository tabs, restored on launch */
+  tabs: string[]
+  activeTab: string | null
+  /** Hidden branch refs per repository */
+  hidden: Record<string, string[]>
 }
 
 const DEFAULTS: StoreData = {
@@ -16,10 +21,14 @@ const DEFAULTS: StoreData = {
     forceColor: true,
     hookTimeoutSec: 0,
     gitPath: 'git',
-    theme: 'light'
+    theme: 'light',
+    keymap: 'default'
   },
   recentRepos: [],
-  lastRepo: null
+  lastRepo: null,
+  tabs: [],
+  activeTab: null,
+  hidden: {}
 }
 
 let data: StoreData = structuredClone(DEFAULTS)
@@ -89,4 +98,67 @@ export function getRecent(): RepoSummary[] {
 
 export function getLastRepo(): string | null {
   return data.lastRepo && existsSync(data.lastRepo) ? data.lastRepo : null
+}
+
+export function getTabs(): { tabs: RepoSummary[]; active: string | null } {
+  const tabs = (data.tabs ?? []).filter((p) => existsSync(p)).map((p) => ({ path: p, name: basename(p) }))
+  // Upgrade path from single-repo versions
+  if (!tabs.length && data.lastRepo && existsSync(data.lastRepo)) tabs.push({ path: data.lastRepo, name: basename(data.lastRepo) })
+  const active = tabs.some((t) => t.path === data.activeTab) ? data.activeTab : tabs[0]?.path ?? null
+  return { tabs, active }
+}
+
+export function setTabs(tabs: string[], active: string | null): void {
+  data.tabs = tabs
+  data.activeTab = active
+  save()
+}
+
+export function getHidden(root: string): string[] {
+  return data.hidden?.[root] ?? []
+}
+
+export function setHidden(root: string, refs: string[]): string[] {
+  data.hidden = { ...(data.hidden ?? {}), [root]: [...new Set(refs)] }
+  save()
+  return data.hidden[root]
+}
+
+// ------------------------------------------------------------------ command history
+
+const HISTORY_MAX = 500
+const OUTPUT_TAIL = 6000
+let history: HistoryEntry[] | null = null
+let historyTimer: NodeJS.Timeout | null = null
+
+function historyFile(): string {
+  return join(app.getPath('userData'), 'history.json')
+}
+
+function loadHistory(): HistoryEntry[] {
+  if (history) return history
+  try {
+    history = existsSync(historyFile()) ? JSON.parse(readFileSync(historyFile(), 'utf8')) : []
+  } catch {
+    history = []
+  }
+  return history!
+}
+
+export function addHistory(e: HistoryEntry): void {
+  const list = loadHistory()
+  list.unshift({ ...e, output: e.output.length > OUTPUT_TAIL ? '…\n' + e.output.slice(-OUTPUT_TAIL) : e.output })
+  if (list.length > HISTORY_MAX) list.length = HISTORY_MAX
+  // Batch disk writes; history can be appended in quick succession by a queue.
+  if (historyTimer) clearTimeout(historyTimer)
+  historyTimer = setTimeout(() => {
+    mkdirSync(app.getPath('userData'), { recursive: true })
+    writeFileSync(historyFile(), JSON.stringify(list))
+  }, 500)
+}
+
+export function getHistory(root?: string, limit = 150): HistoryEntry[] {
+  const norm = (p: string) => p.replace(/\\/g, '/').toLowerCase()
+  const list = loadHistory()
+  return (root ? list.filter((h) => norm(h.root) === norm(root)) : list).slice(0, limit)
 }

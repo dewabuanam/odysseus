@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type {
   CommandResult,
+  RunQueuedEvent,
   HookEvent,
   OutputEvent,
   RunEndEvent,
@@ -12,6 +13,7 @@ import type {
 } from '@shared/types'
 
 export interface RunnerEvents {
+  runQueued(e: RunQueuedEvent): void
   runStart(e: RunStartEvent): void
   output(e: OutputEvent): void
   hook(e: HookEvent): void
@@ -222,6 +224,36 @@ async function killTree(child: ChildProcess, env: NodeJS.ProcessEnv): Promise<vo
 
 export class GitRunner {
   private active = new Map<string, ActiveRun>()
+  /** Tail of each repository's queue. Every write goes through here, strictly in order. */
+  private lanes = new Map<string, Promise<void>>()
+  private cancelledQueued = new Set<string>()
+  private queuedIds = new Set<string>()
+
+  /**
+   * Runs `fn` after everything already queued for `key` has finished (successfully or not).
+   * Pull, checkout, pull, checkout, pull executes in exactly that order, never concurrently,
+   * so git never trips over its own index.lock.
+   */
+  async inQueue<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const norm = key.replace(/\\/g, '/').toLowerCase()
+    const prev = this.lanes.get(norm) ?? Promise.resolve()
+    let release!: () => void
+    const mine = new Promise<void>((r) => (release = r))
+    const tail = prev.then(() => mine)
+    this.lanes.set(norm, tail)
+    await prev
+    try {
+      return await fn()
+    } finally {
+      release()
+      if (this.lanes.get(norm) === tail) this.lanes.delete(norm)
+    }
+  }
+
+  /** A write that isn't user-visible as a run (stage, unstage, apply hunk) but must respect the queue. */
+  mutate(cwd: string, args: string[], opts: { input?: string; allowExit?: number[] } = {}): Promise<string> {
+    return this.inQueue(cwd, () => this.data(cwd, args, opts))
+  }
 
   constructor(private readonly deps: RunnerDeps) {}
 
@@ -231,7 +263,8 @@ export class GitRunner {
     args: string[],
     opts: { input?: string; allowExit?: number[] } = {}
   ): Promise<string> {
-    const env = this.deps.env()
+    // Reads never take optional locks (index refresh), so they can't collide with queued writes.
+    const env = this.deps.env({ GIT_OPTIONAL_LOCKS: '0' })
     return new Promise((resolve, reject) => {
       const child = spawn(this.deps.settings().gitPath, [...DATA_FLAGS, ...args], {
         cwd,
@@ -261,10 +294,29 @@ export class GitRunner {
   async run(
     cwd: string,
     args: string[],
-    opts: { title: string; input?: string; runId?: string } = { title: '' }
+    opts: { title: string; input?: string; runId?: string; queueKey?: string; env?: NodeJS.ProcessEnv } = { title: '' }
+  ): Promise<CommandResult> {
+    const runId = opts.runId ?? `run-${Date.now()}-${++runCounter}`
+    const root = opts.queueKey ?? cwd
+    this.deps.events.runQueued({ runId, root, title: opts.title, args, time: Date.now() })
+    this.queuedIds.add(runId)
+    return this.inQueue(root, async () => {
+      this.queuedIds.delete(runId)
+      if (this.cancelledQueued.delete(runId)) {
+        return { ok: false, exitCode: null, cancelled: true, stdout: '', stderr: '' }
+      }
+      return this.execRun(cwd, args, { ...opts, title: opts.title }, runId, root)
+    })
+  }
+
+  private async execRun(
+    cwd: string,
+    args: string[],
+    opts: { title: string; input?: string; env?: NodeJS.ProcessEnv },
+    runId: string,
+    root: string
   ): Promise<CommandResult> {
     const settings = this.deps.settings()
-    const runId = opts.runId ?? `run-${Date.now()}-${++runCounter}`
     const traceFile = join(tmpdir(), `odysseus-trace2-${process.pid}-${runCounter}-${Date.now()}.json`)
     const started = Date.now()
     const events = this.deps.events
@@ -293,10 +345,11 @@ export class GitRunner {
       : { NO_COLOR: '1' }
     const env = this.deps.env({
       ...colorEnv,
+      ...(opts.env ?? {}),
       GIT_TRACE2_EVENT: traceFile
     })
 
-    events.runStart({ runId, title: opts.title, args, time: started })
+    events.runStart({ runId, root, title: opts.title, args, time: started })
     tracker.start()
 
     const child = spawn(settings.gitPath, ['-c', 'core.quotepath=false', ...args], {
@@ -350,7 +403,14 @@ export class GitRunner {
 
   cancel(runId: string): boolean {
     const run = this.active.get(runId)
-    if (!run) return false
+    if (!run) {
+      // Still waiting in the queue: drop it before it starts.
+      if (!this.queuedIds.has(runId)) return false
+      this.queuedIds.delete(runId)
+      this.cancelledQueued.add(runId)
+      this.deps.events.runEnd({ runId, exitCode: null, cancelled: true, durationMs: 0 })
+      return true
+    }
     run.cancelled = true
     void killTree(run.child, run.env).finally(() => {
       // Orphaned grandchildren may still hold our stdio pipes open; stop waiting for them.
@@ -363,6 +423,7 @@ export class GitRunner {
   }
 
   cancelAll(): void {
+    for (const id of [...this.queuedIds]) this.cancel(id)
     for (const id of this.active.keys()) this.cancel(id)
   }
 }

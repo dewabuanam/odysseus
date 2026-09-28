@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import type { HookEvent, OutputEvent, RunEndEvent, RunStartEvent } from '@shared/types'
+import type { HistoryEntry, HookEvent, OutputEvent, RunEndEvent, RunQueuedEvent, RunStartEvent } from '@shared/types'
 
 export interface HookStep {
   childId: number
@@ -12,27 +12,41 @@ export interface HookStep {
 
 export interface RunState {
   id: string
+  root: string
   title: string
   args: string[]
-  startedAt: number
+  queuedAt: number
+  /** Undefined while the run is waiting in the queue */
+  startedAt?: number
   endedAt?: number
   exitCode?: number | null
   cancelled?: boolean
   failedHook?: string
   output: string
   steps: HookStep[]
+  /** Loaded from the persisted history of a previous session */
+  fromHistory?: boolean
 }
 
 type Listener = () => void
 
 let runs: RunState[] = []
 const listeners = new Set<Listener>()
-const MAX_RUNS = 60
+const MAX_RUNS = 300
 const MAX_OUTPUT = 400_000
+let emitScheduled = false
 
+export const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+
+// Output arrives many times a second; batch notifications to one per animation frame.
 function emit(): void {
-  runs = [...runs]
-  listeners.forEach((l) => l())
+  if (emitScheduled) return
+  emitScheduled = true
+  requestAnimationFrame(() => {
+    emitScheduled = false
+    runs = [...runs]
+    listeners.forEach((l) => l())
+  })
 }
 
 function update(id: string, fn: (r: RunState) => RunState): void {
@@ -42,6 +56,8 @@ function update(id: string, fn: (r: RunState) => RunState): void {
   emit()
 }
 
+const loadedHistory = new Set<string>()
+
 export const runStore = {
   subscribe(l: Listener) {
     listeners.add(l)
@@ -50,13 +66,42 @@ export const runStore = {
     }
   },
   get: () => runs,
-  clear() {
-    runs = runs.filter((r) => r.endedAt === undefined)
+  clear(root: string) {
+    runs = runs.filter((r) => norm(r.root) !== norm(root) || r.endedAt === undefined)
+    emit()
+  },
+  /** Seed a tab's console with the persisted command history (once per repository). */
+  loadHistory(root: string, entries: HistoryEntry[]) {
+    if (loadedHistory.has(norm(root))) return
+    loadedHistory.add(norm(root))
+    const known = new Set(runs.map((r) => r.id))
+    const old: RunState[] = entries
+      .filter((h) => !known.has(h.id))
+      .map((h) => ({
+        id: h.id,
+        root: h.root,
+        title: h.title,
+        args: h.args,
+        queuedAt: h.startedAt,
+        startedAt: h.startedAt,
+        endedAt: h.startedAt + h.durationMs,
+        exitCode: h.exitCode,
+        cancelled: h.cancelled,
+        failedHook: h.failedHook,
+        output: h.output,
+        steps: [],
+        fromHistory: true
+      }))
+    runs = [...runs, ...old].slice(0, MAX_RUNS)
+    emit()
+  },
+  onQueued(e: RunQueuedEvent) {
+    runs = [{ id: e.runId, root: e.root, title: e.title, args: e.args, queuedAt: e.time, output: '', steps: [] }, ...runs].slice(0, MAX_RUNS)
     emit()
   },
   onStart(e: RunStartEvent) {
-    runs = [{ id: e.runId, title: e.title, args: e.args, startedAt: e.time, output: '', steps: [] }, ...runs].slice(0, MAX_RUNS)
-    emit()
+    if (!runs.some((r) => r.id === e.runId)) this.onQueued({ ...e })
+    update(e.runId, (r) => ({ ...r, startedAt: e.time }))
   },
   onOutput(e: OutputEvent) {
     update(e.runId, (r) => {
@@ -73,9 +118,7 @@ export const runStore = {
       return {
         ...r,
         steps: r.steps.map((s) =>
-          s.childId === e.childId
-            ? { ...s, state: e.exitCode === 0 ? 'ok' : 'fail', exitCode: e.exitCode, durationMs: e.durationMs }
-            : s
+          s.childId === e.childId ? { ...s, state: e.exitCode === 0 ? 'ok' : 'fail', exitCode: e.exitCode, durationMs: e.durationMs } : s
         )
       }
     })
@@ -83,20 +126,28 @@ export const runStore = {
   onEnd(e: RunEndEvent) {
     update(e.runId, (r) => ({
       ...r,
-      endedAt: r.startedAt + e.durationMs,
+      startedAt: r.startedAt ?? Date.now(),
+      endedAt: (r.startedAt ?? Date.now()) + e.durationMs,
       exitCode: e.exitCode,
       cancelled: e.cancelled,
       failedHook: e.failedHook,
-      // Any step still "running" was killed.
       steps: r.steps.map((s) => (s.state === 'running' ? { ...s, state: 'fail' } : s))
     }))
   }
 }
 
-export function useRuns(): RunState[] {
-  return useSyncExternalStore(runStore.subscribe, runStore.get)
+export function useRuns(root?: string): RunState[] {
+  const all = useSyncExternalStore(runStore.subscribe, runStore.get)
+  return root ? all.filter((r) => norm(r.root) === norm(root)) : all
 }
 
-export function useActiveRun(): RunState | undefined {
-  return useRuns().find((r) => r.endedAt === undefined)
+/** The run currently executing in a repository (not queued, not finished). */
+export function useActiveRun(root?: string): RunState | undefined {
+  return useRuns(root).find((r) => r.startedAt !== undefined && r.endedAt === undefined)
 }
+
+export function useQueued(root?: string): RunState[] {
+  return useRuns(root).filter((r) => r.startedAt === undefined && r.endedAt === undefined)
+}
+
+export const isRunActive = (r: RunState) => r.startedAt !== undefined && r.endedAt === undefined

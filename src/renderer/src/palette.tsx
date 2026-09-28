@@ -37,6 +37,8 @@ export type Step =
 const isMac = navigator.userAgent.includes('Mac')
 
 export function formatKeys(keys: string): string {
+  if (keys === 'Shift Shift') return isMac ? '⇧⇧' : 'Shift Shift'
+  if (keys.includes(' ')) return keys.split(' ').map(formatKeys).join(' ')
   return keys
     .split('+')
     .map((k) => (k === 'Mod' ? (isMac ? '⌘' : 'Ctrl') : k === 'Shift' && isMac ? '⇧' : k === 'Alt' && isMac ? '⌥' : k))
@@ -123,21 +125,43 @@ function Highlight({ text, hits }: { text: string; hits: number[] }) {
 
 // ------------------------------------------------------------------ recents
 
-const RECENT_KEY = 'odysseus.palette.recent'
-function loadRecent(): string[] {
+// ------------------------------------------------------------------ usage ranking
+
+/**
+ * "Frecency": how often and how recently each item was chosen. Keyed per step, so the push
+ * option or branch you pick most rises to the top of that list, not just top-level commands.
+ */
+const USAGE_KEY = 'odysseus.palette.usage'
+type Usage = Record<string, { n: number; t: number }>
+let usageCache: Usage | null = null
+
+function loadUsage(): Usage {
+  if (usageCache) return usageCache
   try {
-    return JSON.parse(localStorage.getItem(RECENT_KEY) ?? '[]')
+    usageCache = JSON.parse(localStorage.getItem(USAGE_KEY) ?? '{}')
   } catch {
-    return []
+    usageCache = {}
   }
+  return usageCache!
 }
-function pushRecent(id: string) {
+
+export function recordUsage(key: string) {
+  const u = loadUsage()
+  const e = u[key] ?? { n: 0, t: 0 }
+  u[key] = { n: e.n + 1, t: Date.now() }
   try {
-    const list = [id, ...loadRecent().filter((x) => x !== id)].slice(0, 12)
-    localStorage.setItem(RECENT_KEY, JSON.stringify(list))
+    localStorage.setItem(USAGE_KEY, JSON.stringify(u))
   } catch {
     /* storage unavailable */
   }
+}
+
+export function usageScore(key: string): number {
+  const e = loadUsage()[key]
+  if (!e) return 0
+  const days = (Date.now() - e.t) / 86_400_000
+  const recency = days < 1 ? 4 : days < 7 ? 2 : days < 30 ? 1 : 0.5
+  return Math.log2(1 + e.n) * 3 + recency
 }
 
 // ------------------------------------------------------------------ component
@@ -160,29 +184,31 @@ export function Palette({ initial, onClose }: { initial: Step; onClose(): void }
   const isRoot = stack.length === 1
   const crumbs = stack.map((s) => s.crumb).filter(Boolean) as string[]
 
+  const scope = crumbs.join(' › ') || 'root'
+  const usageKey = (c: Cmd) => `${scope}|${c.id}`
+
   const results = useMemo(() => {
     if (step.kind !== 'list') return []
     const items = step.items.filter((c) => c.when !== false)
     if (!typed.trim()) {
-      if (!isRoot) return items.map((c) => ({ c, hits: [] as number[] }))
-      const recent = loadRecent()
-      const rank = (c: Cmd) => {
-        const i = recent.indexOf(c.id)
-        return i === -1 ? 999 : i
-      }
-      return [...items].sort((a, b) => rank(a) - rank(b)).map((c) => ({ c, hits: [] as number[] }))
+      // Most-used first; ties keep the list's own order (stable sort).
+      return items
+        .map((c, i) => ({ c, hits: [] as number[], u: usageScore(usageKey(c)), i }))
+        .sort((a, b) => b.u - a.u || a.i - b.i)
     }
     const scored: { c: Cmd; hits: number[]; score: number }[] = []
     for (const c of items) {
+      const bonus = Math.min(usageScore(usageKey(c)), 12)
       const m = fuzzy(typed, c.title)
-      if (m) scored.push({ c, hits: m.hits, score: m.score })
+      if (m) scored.push({ c, hits: m.hits, score: m.score + bonus })
       else {
         const d = fuzzy(typed, `${c.detail ?? ''} ${c.cmdline ?? ''}`)
-        if (d) scored.push({ c, hits: [], score: d.score - 5 })
+        if (d) scored.push({ c, hits: [], score: d.score - 5 + bonus })
       }
     }
     return scored.sort((a, b) => b.score - a.score)
-  }, [step, typed, isRoot])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, typed, scope])
 
   const suggestions = useMemo(() => {
     if (step.kind !== 'input' || !step.suggestions) return []
@@ -212,7 +238,7 @@ export function Palette({ initial, onClose }: { initial: Step; onClose(): void }
     setBusy(true)
     try {
       const r = await next
-      if (r) {
+      if (r && typeof r === 'object' && (r.kind === 'list' || r.kind === 'input')) {
         setStack((s) => [...s, { step: r, crumb: r.title ?? crumb }])
         reset(r)
       } else onClose()
@@ -225,7 +251,7 @@ export function Palette({ initial, onClose }: { initial: Step; onClose(): void }
   }
 
   const choose = (c: Cmd) => {
-    if (isRoot) pushRecent(c.id)
+    recordUsage(usageKey(c))
     advance(c.run(), crumbOf(c.title))
   }
 

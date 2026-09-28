@@ -6,22 +6,33 @@ import { GitRepo, type DiffSource } from './git/repo'
 import { HookService } from './git/hooks'
 import { GitRunner } from './git/runner'
 import {
+  addHistory,
   addRecent,
   configurePortableMode,
-  getLastRepo,
+  getHidden,
+  getHistory,
   getRecent,
   getSettings,
+  getTabs,
   loadStore,
   removeRecent,
-  setSettings
+  setHidden,
+  setSettings,
+  setTabs
 } from './store'
-import type { FetchOptions, FileDiff, HookName, MergeOptions, PullOptions, Settings, StashOptions } from '@shared/types'
+import type {
+  FetchOptions,
+  FileDiff,
+  HookName,
+  LogOptions,
+  MergeOptions,
+  PullOptions,
+  RepoSummary,
+  Settings,
+  StashOptions
+} from '@shared/types'
 
 let win: BrowserWindow | null = null
-let repo: GitRepo | null = null
-let hooks: HookService | null = null
-let watcher: FSWatcher | null = null
-let changeTimer: NodeJS.Timeout | null = null
 
 configurePortableMode()
 
@@ -30,6 +41,8 @@ const iconPath = join(__dirname, '../../resources/icon.png')
 function send(channel: string, payload: unknown): void {
   win?.webContents.send('ody:event', channel, payload)
 }
+
+// ------------------------------------------------------------------ runner + history
 
 // Hook output can arrive in thousands of tiny chunks. Coalesce per run and flush at most
 // every 40ms so the renderer isn't flooded with IPC messages and re-renders.
@@ -42,12 +55,25 @@ function flushOutput(): void {
   outputBuffers.clear()
 }
 
+/** Everything needed to persist a finished run to the command history. */
+const runMeta = new Map<string, { root: string; title: string; args: string[]; startedAt: number; output: string }>()
+
 const runner = new GitRunner({
   settings: getSettings,
   env: (extra) => buildEnv(getSettings(), extra),
   events: {
-    runStart: (e) => send('runStart', e),
+    runQueued: (e) => {
+      runMeta.set(e.runId, { root: e.root, title: e.title, args: e.args, startedAt: e.time, output: '' })
+      send('runQueued', e)
+    },
+    runStart: (e) => {
+      const m = runMeta.get(e.runId)
+      if (m) m.startedAt = e.time
+      send('runStart', e)
+    },
     output: (e) => {
+      const m = runMeta.get(e.runId)
+      if (m && m.output.length < 200_000) m.output += e.text
       const b = outputBuffers.get(e.runId)
       if (b) b.text += e.text
       else outputBuffers.set(e.runId, { stream: e.stream, text: e.text })
@@ -60,9 +86,27 @@ const runner = new GitRunner({
     runEnd: (e) => {
       flushOutput()
       send('runEnd', e)
+      const m = runMeta.get(e.runId)
+      runMeta.delete(e.runId)
+      if (m) {
+        addHistory({
+          id: e.runId,
+          root: m.root,
+          title: m.title,
+          args: m.args,
+          startedAt: m.startedAt,
+          durationMs: e.durationMs,
+          exitCode: e.exitCode,
+          cancelled: e.cancelled,
+          failedHook: e.failedHook,
+          output: m.output
+        })
+      }
     }
   }
 })
+
+// ------------------------------------------------------------------ open repositories (tabs)
 
 /**
  * Classifies file-system changes so the renderer only reloads what changed: worktree and
@@ -81,49 +125,62 @@ function classify(f: string): 'status' | 'refs' | 'hooks' | null {
   return null
 }
 
-let pendingScopes = new Set<string>()
-function watchRepo(root: string): void {
-  watcher?.close()
+interface OpenRepo {
+  repo: GitRepo
+  hooks: HookService
+  watcher: FSWatcher | null
+  timer: NodeJS.Timeout | null
+  scopes: Set<string>
+}
+
+const open = new Map<string, OpenRepo>()
+const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+
+function register(root: string): OpenRepo {
+  const key = norm(root)
+  let o = open.get(key)
+  if (o) return o
+  o = { repo: new GitRepo(root, runner), hooks: new HookService(root, runner, () => envPath(getSettings())), watcher: null, timer: null, scopes: new Set() }
+  const entry = o
   try {
-    watcher = watch(root, { recursive: true }, (_evt, file) => {
+    entry.watcher = watch(root, { recursive: true }, (_evt, file) => {
       const scope = classify(String(file ?? '').replace(/\\/g, '/'))
       if (!scope) return
-      pendingScopes.add(scope)
-      if (changeTimer) clearTimeout(changeTimer)
-      changeTimer = setTimeout(() => {
-        send('repoChanged', { root, scopes: [...pendingScopes] })
-        pendingScopes = new Set()
+      entry.scopes.add(scope)
+      if (entry.timer) clearTimeout(entry.timer)
+      entry.timer = setTimeout(() => {
+        send('repoChanged', { root, scopes: [...entry.scopes] })
+        entry.scopes = new Set()
       }, 250)
     })
   } catch {
-    watcher = null
+    entry.watcher = null
   }
+  open.set(key, entry)
+  return entry
 }
 
-async function openRepo(dir: string): Promise<{ path: string; name: string }> {
+function unregister(root: string): void {
+  const key = norm(root)
+  const o = open.get(key)
+  if (!o) return
+  o.watcher?.close()
+  if (o.timer) clearTimeout(o.timer)
+  open.delete(key)
+}
+
+async function openRepo(dir: string): Promise<RepoSummary> {
   const root = await GitRepo.resolveRoot(runner, dir)
-  repo = new GitRepo(root, runner)
-  hooks = new HookService(root, runner, () => envPath(getSettings()))
+  register(root)
   addRecent(root)
-  watchRepo(root)
-  win?.setTitle(`${root.split(/[\\/]/).pop()} - Odysseus`)
   return { path: root, name: root.split(/[\\/]/).pop() ?? root }
 }
 
-function requireRepo(): GitRepo {
-  if (!repo) throw new Error('No repository open')
-  return repo
-}
-
-function requireHooks(): HookService {
-  if (!hooks) throw new Error('No repository open')
-  return hooks
-}
+// ------------------------------------------------------------------ IPC: app-level
 
 type Handler = (...args: any[]) => unknown
 
-const api: Record<string, Handler> = {
-  // app
+const appApi: Record<string, Handler> = {
   getSettings: () => getSettings(),
   setSettings: async (patch: Partial<Settings>) => {
     const s = setSettings(patch)
@@ -133,12 +190,14 @@ const api: Record<string, Handler> = {
   diagnostics: () => diagnostics(getSettings()),
   recentRepos: () => getRecent(),
   removeRecent: (p: string) => removeRecent(p),
-  lastRepo: () => getLastRepo(),
+  getTabs: () => getTabs(),
+  setTabs: (tabs: string[], active: string | null) => setTabs(tabs, active),
   pickRepo: async () => {
     const r = await dialog.showOpenDialog(win!, { properties: ['openDirectory'] })
     return r.canceled ? null : r.filePaths[0]
   },
   openRepo: (dir: string) => openRepo(dir),
+  closeRepo: (root: string) => unregister(root),
   initRepo: async () => {
     const r = await dialog.showOpenDialog(win!, { properties: ['openDirectory', 'createDirectory'] })
     if (r.canceled) return null
@@ -154,6 +213,7 @@ const api: Record<string, Handler> = {
     if (!res.ok) throw new Error(res.stderr.trim() || 'Clone failed')
     return openRepo(target)
   },
+  history: (root?: string, limit?: number) => getHistory(root, limit),
   openExternal: (p: string) => shell.openPath(p),
   showInFolder: (p: string) => shell.showItemInFolder(p),
   cancelRun: (id: string) => runner.cancel(id),
@@ -161,74 +221,101 @@ const api: Record<string, Handler> = {
   windowMinimize: () => win?.minimize(),
   windowToggleMaximize: () => (win?.isMaximized() ? win.unmaximize() : win?.maximize()),
   windowClose: () => win?.close(),
-  windowIsMaximized: () => win?.isMaximized() ?? false,
+  windowIsMaximized: () => win?.isMaximized() ?? false
+}
 
+// ------------------------------------------------------------------ IPC: per repository
+
+type RepoHandler = (o: OpenRepo, ...args: any[]) => unknown
+
+const repoApi: Record<string, RepoHandler> = {
   // read
-  status: () => requireRepo().status(),
-  log: (limit?: number, knownKey?: string) => requireRepo().log(limit, knownKey),
-  commitDetail: (sha: string) => requireRepo().commitDetail(sha),
-  diff: (src: DiffSource, context?: number) => requireRepo().diff(src, context),
-  branches: () => requireRepo().branches(),
-  tags: () => requireRepo().tags(),
-  stashes: () => requireRepo().stashes(),
-  remotes: () => requireRepo().remotes(),
-  lastCommitMessage: () => requireRepo().lastCommitMessage(),
+  status: ({ repo }) => repo.status(),
+  log: ({ repo }, limit?: number, knownKey?: string, opts?: LogOptions) => repo.log(limit, knownKey, opts),
+  logRef: ({ repo }, ref: string) => repo.logRef(ref),
+  commitDetail: ({ repo }, sha: string) => repo.commitDetail(sha),
+  diff: ({ repo }, src: DiffSource, context?: number) => repo.diff(src, context),
+  branches: ({ repo }) => repo.branches(),
+  tags: ({ repo }) => repo.tags(),
+  stashes: ({ repo }) => repo.stashes(),
+  remotes: ({ repo }) => repo.remotes(),
+  lastCommitMessage: ({ repo }) => repo.lastCommitMessage(),
+  conflictContent: ({ repo }, path: string) => repo.conflictContent(path),
+  getHidden: ({ repo }) => getHidden(repo.root),
+  identity: ({ repo }) => repo.identity(),
+  setIdentity: ({ repo }, name: string, email: string, global: boolean) => repo.setIdentity(name, email, global),
+  setHidden: ({ repo }, refs: string[]) => setHidden(repo.root, refs),
 
-  // index
-  stage: (paths: string[]) => requireRepo().stage(paths),
-  stageAll: () => requireRepo().stageAll(),
-  unstage: (paths: string[]) => requireRepo().unstage(paths),
-  unstageAll: () => requireRepo().unstageAll(),
-  discard: (paths: string[], untracked: string[]) => requireRepo().discard(paths, untracked),
-  applyHunk: (file: FileDiff, hunk: number, lines: number[] | null, mode: 'stage' | 'unstage' | 'discard') =>
-    requireRepo().applyHunk(file, hunk, lines, mode),
+  // index (queued)
+  stage: ({ repo }, paths: string[]) => repo.stage(paths),
+  stageAll: ({ repo }) => repo.stageAll(),
+  unstage: ({ repo }, paths: string[]) => repo.unstage(paths),
+  unstageAll: ({ repo }) => repo.unstageAll(),
+  discard: ({ repo }, paths: string[], untracked: string[]) => repo.discard(paths, untracked),
+  applyHunk: ({ repo }, file: FileDiff, hunk: number, lines: number[] | null, mode: 'stage' | 'unstage' | 'discard') =>
+    repo.applyHunk(file, hunk, lines, mode),
+  resolveConflict: ({ repo }, path: string, side: 'ours' | 'theirs') => repo.resolveConflict(path, side),
 
-  // write
-  commit: (o) => requireRepo().commit(o),
-  checkout: (ref: string) => requireRepo().checkout(ref),
-  checkoutRemote: (ref: string) => requireRepo().checkoutRemote(ref),
-  createBranch: (n: string, s?: string, c?: boolean) => requireRepo().createBranch(n, s, c),
-  deleteBranch: (n: string, f?: boolean) => requireRepo().deleteBranch(n, f),
-  merge: (ref: string, opts?: MergeOptions | boolean) => requireRepo().merge(ref, opts),
-  rebase: (onto: string, autostash?: boolean) => requireRepo().rebase(onto, autostash),
-  abortOperation: (op: string) => requireRepo().abortOperation(op),
-  continueOperation: (op: string) => requireRepo().continueOperation(op),
-  cherryPick: (sha: string) => requireRepo().cherryPick(sha),
-  revert: (sha: string) => requireRepo().revert(sha),
-  reset: (sha: string, mode: 'soft' | 'mixed' | 'hard') => requireRepo().reset(sha, mode),
-  createTag: (n: string, sha: string, m?: string) => requireRepo().createTag(n, sha, m),
-  deleteTag: (n: string) => requireRepo().deleteTag(n),
-  fetch: (o?: FetchOptions) => requireRepo().fetch(o),
-  pull: (o?: PullOptions | boolean) => requireRepo().pull(o),
-  push: (o) => requireRepo().push(o),
-  stash: (o?: StashOptions | string) => requireRepo().stash(o),
-  stashApply: (ref: string, pop: boolean) => requireRepo().stashApply(ref, pop),
-  stashDrop: (ref: string) => requireRepo().stashDrop(ref),
+  // commands (queued, hook-aware, recorded in history)
+  commit: ({ repo }, o) => repo.commit(o),
+  checkout: ({ repo }, ref: string) => repo.checkout(ref),
+  checkoutRemote: ({ repo }, ref: string) => repo.checkoutRemote(ref),
+  createBranch: ({ repo }, n: string, s?: string, c?: boolean) => repo.createBranch(n, s, c),
+  deleteBranch: ({ repo }, n: string, f?: boolean) => repo.deleteBranch(n, f),
+  renameBranch: ({ repo }, from: string, to: string) => repo.renameBranch(from, to),
+  setUpstream: ({ repo }, b: string, u: string) => repo.setUpstream(b, u),
+  unsetUpstream: ({ repo }, b: string) => repo.unsetUpstream(b),
+  deleteRemoteBranch: ({ repo }, ref: string) => repo.deleteRemoteBranch(ref),
+  merge: ({ repo }, ref: string, opts?: MergeOptions | boolean) => repo.merge(ref, opts),
+  rebase: ({ repo }, onto: string, autostash?: boolean) => repo.rebase(onto, autostash),
+  abortOperation: ({ repo }, op: string) => repo.abortOperation(op),
+  continueOperation: ({ repo }, op: string) => repo.continueOperation(op),
+  cherryPick: ({ repo }, sha: string) => repo.cherryPick(sha),
+  revert: ({ repo }, sha: string) => repo.revert(sha),
+  reset: ({ repo }, sha: string, mode: 'soft' | 'mixed' | 'hard') => repo.reset(sha, mode),
+  rewordCommit: ({ repo }, sha: string, message: string) => repo.rewordCommit(sha, message),
+  dropCommit: ({ repo }, sha: string) => repo.dropCommit(sha),
+  createTag: ({ repo }, n: string, sha: string, m?: string) => repo.createTag(n, sha, m),
+  deleteTag: ({ repo }, n: string) => repo.deleteTag(n),
+  fetch: ({ repo }, o?: FetchOptions) => repo.fetch(o),
+  pull: ({ repo }, o?: PullOptions | boolean) => repo.pull(o),
+  push: ({ repo }, o) => repo.push(o),
+  stash: ({ repo }, o?: StashOptions | string) => repo.stash(o),
+  stashApply: ({ repo }, ref: string, pop: boolean) => repo.stashApply(ref, pop),
+  stashDrop: ({ repo }, ref: string) => repo.stashDrop(ref),
 
   // submodules
-  submodules: () => requireRepo().submodules(),
-  superproject: () => requireRepo().superproject(),
-  submoduleUpdate: (paths?: string[], o?: { init?: boolean; remote?: boolean }) => requireRepo().submoduleUpdate(paths, o),
-  submoduleSync: () => requireRepo().submoduleSync(),
-  submoduleAdd: (url: string, path: string, branch?: string) => requireRepo().submoduleAdd(url, path, branch),
-  submoduleDeinit: (path: string) => requireRepo().submoduleDeinit(path),
-  submodulePath: (path: string) => join(requireRepo().root, path),
+  submodules: ({ repo }) => repo.submodules(),
+  superproject: ({ repo }) => repo.superproject(),
+  submoduleUpdate: ({ repo }, paths?: string[], o?: { init?: boolean; remote?: boolean }) => repo.submoduleUpdate(paths, o),
+  submoduleSync: ({ repo }) => repo.submoduleSync(),
+  submoduleAdd: ({ repo }, url: string, path: string, branch?: string) => repo.submoduleAdd(url, path, branch),
+  submoduleDeinit: ({ repo }, path: string) => repo.submoduleDeinit(path),
+  submodulePath: ({ repo }, path: string) => join(repo.root, path),
 
   // hooks
-  hooksOverview: () => requireHooks().overview(),
-  readHook: (n: HookName) => requireHooks().read(n),
-  writeHook: (n: HookName, c: string) => requireHooks().write(n, c),
-  setHookEnabled: (n: HookName, e: boolean) => requireHooks().setEnabled(n, e),
-  removeHook: (n: HookName) => requireHooks().remove(n),
-  makeHookExecutable: (n: HookName) => requireHooks().makeExecutable(n),
-  runHook: (n: HookName, msg?: string) => requireHooks().run(n, msg)
+  hooksOverview: ({ hooks }) => hooks.overview(),
+  readHook: ({ hooks }, n: HookName) => hooks.read(n),
+  writeHook: ({ hooks }, n: HookName, c: string) => hooks.write(n, c),
+  setHookEnabled: ({ hooks }, n: HookName, e: boolean) => hooks.setEnabled(n, e),
+  removeHook: ({ hooks }, n: HookName) => hooks.remove(n),
+  makeHookExecutable: ({ hooks }, n: HookName) => hooks.makeExecutable(n),
+  runHook: ({ hooks }, n: HookName, msg?: string) => hooks.run(n, msg)
 }
 
 ipcMain.handle('ody:invoke', async (_e, method: string, args: unknown[]) => {
-  const fn = api[method]
+  const fn = appApi[method]
   if (!fn) throw new Error(`Unknown method ${method}`)
   return fn(...args)
 })
+
+ipcMain.handle('ody:repo', async (_e, root: string, method: string, args: unknown[]) => {
+  const fn = repoApi[method]
+  if (!fn) throw new Error(`Unknown method ${method}`)
+  return fn(register(root), ...args)
+})
+
+// ------------------------------------------------------------------ window
 
 function createWindow(): void {
   win = new BrowserWindow({
@@ -236,7 +323,7 @@ function createWindow(): void {
     height: 900,
     minWidth: 900,
     minHeight: 560,
-    backgroundColor: '#f6f3ec',
+    backgroundColor: getSettings().theme === 'dark' ? '#1c1d1e' : '#f6f3ec',
     title: 'Odysseus',
     icon: existsSync(iconPath) ? nativeImage.createFromPath(iconPath) : undefined,
     show: false,
@@ -270,7 +357,7 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', () => {
   runner.cancelAll()
-  watcher?.close()
+  for (const root of [...open.keys()]) unregister(root)
 })
 
 app.on('window-all-closed', () => {

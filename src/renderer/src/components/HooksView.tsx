@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { HookInfo, HookName } from '@shared/types'
-import { api } from '../api'
+import { useApi } from '../api'
 import { useRepo } from '../repoContext'
 import { HOOK_DOCS, HOOK_TEMPLATE, useUi } from '../ui'
 
@@ -21,6 +21,7 @@ function hookState(h: HookInfo): { cls: string; label: string } {
 
 export function HooksView({ selected: selectedProp, onSelect, onOpenSettings }: { selected: string; onSelect(h: HookName): void; onOpenSettings(): void }) {
   const repo = useRepo()
+  const api = useApi()
   const ui = useUi()
   const overview = repo.hooks
   const selected = selectedProp as HookName

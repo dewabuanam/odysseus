@@ -21,6 +21,8 @@ export interface Submodule {
   /** ok: matches recorded commit; modified: checked out at a different commit */
   state: 'ok' | 'modified' | 'uninitialized' | 'conflict'
   describe?: string
+  /** Nesting level for submodules inside submodules */
+  depth?: number
 }
 
 export interface PullOptions {
@@ -218,10 +220,44 @@ export interface OutputEvent {
 
 export interface RunStartEvent {
   runId: string
+  /** Repository (queue) the run belongs to */
+  root: string
   title: string
   args: string[]
   time: number
 }
+
+/** A command accepted into a repository's queue; it starts once everything before it ends. */
+export interface RunQueuedEvent {
+  runId: string
+  root: string
+  title: string
+  args: string[]
+  time: number
+}
+
+export interface HistoryEntry {
+  id: string
+  root: string
+  title: string
+  args: string[]
+  startedAt: number
+  durationMs: number
+  exitCode: number | null
+  cancelled: boolean
+  failedHook?: string
+  /** Tail of the combined output */
+  output: string
+}
+
+export interface LogOptions {
+  /** Full ref names hidden from the graph (refs/heads/x, refs/remotes/o/x) */
+  hidden?: string[]
+  /** Show only history reachable from this ref */
+  only?: string
+}
+
+export type Keymap = 'default' | 'vscode' | 'jetbrains' | 'resharper'
 
 export interface RunEndEvent {
   runId: string
@@ -268,6 +304,8 @@ export interface Settings {
   hookTimeoutSec: number
   gitPath: string
   theme: 'dark' | 'light'
+  /** Keyboard shortcut preset */
+  keymap: Keymap
 }
 
 export interface EnvDiagnostics {

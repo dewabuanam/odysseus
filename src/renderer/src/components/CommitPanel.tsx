@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import type { CommitDetail, FileDiff } from '@shared/types'
-import { api } from '../api'
+import { useApi } from '../api'
 import { useRepo } from '../repoContext'
 import { useUi } from '../ui'
 import { DiffView } from './DiffView'
 
 export function CommitPanel({ sha }: { sha: string }) {
   const repo = useRepo()
+  const api = useApi()
   const ui = useUi()
   const [detail, setDetail] = useState<CommitDetail | null>(null)
   const [error, setError] = useState<string | null>(null)

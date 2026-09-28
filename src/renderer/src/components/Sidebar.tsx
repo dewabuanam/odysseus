@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import type { Branch } from '@shared/types'
-import { api } from '../api'
+import { useApi } from '../api'
+import { input } from '../commands'
 import { useRepo } from '../repoContext'
 import { useUi } from '../ui'
 
@@ -28,6 +29,7 @@ interface Props {
 export function Sidebar({ selected, view, onSelectWorking, onShowHooks }: Props) {
   const repo = useRepo()
   const ui = useUi()
+  const api = useApi()
   const { status, branches, tags, stashes, remotes, hooks } = repo
   const local = branches.filter((b) => !b.remote)
   const current = local.find((b) => b.current)
@@ -35,44 +37,9 @@ export function Sidebar({ selected, view, onSelectWorking, onShowHooks }: Props)
 
   const branchMenu = (e: React.MouseEvent, b: Branch) => {
     e.preventDefault()
-    const cur = current?.name
-    const items = b.remote
-      ? [
-          { label: `Checkout as local branch`, action: () => repo.exec(() => api.checkoutRemote(b.name)) },
-          { label: `Merge ${b.name} into ${cur ?? 'HEAD'}`, action: () => repo.exec(() => api.merge(b.name)), disabled: !cur },
-          { label: `Rebase ${cur ?? 'HEAD'} onto ${b.name}`, action: () => repo.exec(() => api.rebase(b.name)), disabled: !cur },
-          { separator: true, label: '' },
-          { label: 'Copy name', action: () => navigator.clipboard.writeText(b.name) }
-        ]
-      : [
-          { label: 'Checkout', action: () => repo.exec(() => api.checkout(b.name)), disabled: b.current },
-          { label: `Merge into ${cur ?? 'HEAD'}`, action: () => repo.exec(() => api.merge(b.name)), disabled: b.current || !cur },
-          { label: `Rebase ${cur ?? 'HEAD'} onto ${b.name}`, action: () => repo.exec(() => api.rebase(b.name)), disabled: b.current || !cur },
-          {
-            label: 'New branch from here…',
-            action: async () => {
-              const r = await ui.ask({ title: `New branch from ${b.name}`, input: { label: 'Branch name' }, confirmLabel: 'Create' })
-              if (r) repo.exec(() => api.createBranch(r.value, b.name))
-            }
-          },
-          {
-            label: b.upstream ? 'Push' : 'Push & set upstream',
-            action: () => repo.exec(() => api.push({ remote: remotes[0]?.name, branch: b.name, setUpstream: !b.upstream }), 'Pushed')
-          },
-          { separator: true, label: '' },
-          { label: 'Copy name', action: () => navigator.clipboard.writeText(b.name) },
-          {
-            label: 'Delete…',
-            danger: true,
-            disabled: b.current,
-            action: async () => {
-              const r = await ui.ask({ title: `Delete branch ${b.name}?`, checkbox: { label: 'Force delete (even if not merged)' }, confirmLabel: 'Delete', danger: true })
-              if (r) repo.exec(() => api.deleteBranch(b.name, r.checked))
-            }
-          }
-        ]
-    ui.menu(e, items)
+    repo.branchMenu(e, b)
   }
+  const isHidden = (b: Branch) => repo.hidden.includes(b.fullRef)
 
   const hookCounts = hooks ? { active: hooks.hooks.filter((h) => h.enabled).length, disabled: hooks.hooks.filter((h) => h.exists && !h.enabled).length } : null
 
@@ -98,11 +65,11 @@ export function Sidebar({ selected, view, onSelectWorking, onShowHooks }: Props)
         {local.map((b) => (
           <div
             key={b.fullRef}
-            className={`sb-item ${b.current ? 'current' : ''} ${selected === b.sha && view === 'history' ? 'active' : ''}`}
+            className={`sb-item ${b.current ? 'current' : ''} ${isHidden(b) ? 'hidden-ref' : ''} ${selected === b.sha && view === 'history' ? 'active' : ''}`}
             onClick={() => repo.select(b.sha)}
             onDoubleClick={() => !b.current && repo.exec(() => api.checkout(b.name))}
             onContextMenu={(e) => branchMenu(e, b)}
-            title={b.upstream ? `tracking ${b.upstream}` : 'no upstream'}
+            title={`${b.upstream ? `tracking ${b.upstream}` : 'no upstream'}${isHidden(b) ? ' (hidden from graph)' : ''}`}
           >
             <span>{b.current ? '●' : '○'}</span>
             <span className="ellipsis">{b.name}</span>
@@ -121,7 +88,7 @@ export function Sidebar({ selected, view, onSelectWorking, onShowHooks }: Props)
         return (
           <Section key={r.name} title={`Remote: ${r.name}`} count={rb.length} defaultOpen={false}>
             {rb.map((b) => (
-              <div key={b.fullRef} className="sb-item" onClick={() => repo.select(b.sha)} onContextMenu={(e) => branchMenu(e, b)} onDoubleClick={() => repo.exec(() => api.checkoutRemote(b.name))}>
+              <div key={b.fullRef} className={`sb-item ${isHidden(b) ? 'hidden-ref' : ''}`} onClick={() => repo.select(b.sha)} onContextMenu={(e) => branchMenu(e, b)} onDoubleClick={() => repo.exec(() => api.checkoutRemote(b.name))}>
                 <span className="faint">⎇</span>
                 <span className="ellipsis">{b.name.slice(r.name.length + 1)}</span>
               </div>
@@ -189,17 +156,35 @@ const SUB_STATE: Record<string, { cls: string; label: string }> = {
 function SubmoduleSection() {
   const repo = useRepo()
   const ui = useUi()
+  const api = useApi()
   const subs = repo.submodules
-  if (!subs.length) return null
   const open = async (path: string) => repo.openRepo(await api.submodulePath(path))
+  const add = () =>
+    repo.openPalette(
+      input('Repository URL or local path', (url) => {
+        const name = url.replace(/\/+$/, '').replace(/\.git$/, '').split(/[/:\\]/).pop() || 'module'
+        return input('Path inside this repository', (path) => { repo.exec(() => api.submoduleAdd(url, path), `Added submodule ${path}`) }, {
+          value: name,
+          title: name,
+          suggestions: [{ value: name }, { value: `vendor/${name}` }, { value: `libs/${name}` }]
+        })
+      }, { title: 'Add Submodule' })
+    )
   return (
-    <Section title="Submodules" count={subs.length}>
+    <Section title="Submodules" count={subs.length} defaultOpen={subs.length > 0}>
+      {subs.length === 0 && (
+        <div className="sb-item faint" onClick={add} title="git submodule add">
+          <span>+</span>
+          <span>Add submodule…</span>
+        </div>
+      )}
       {subs.map((s) => {
         const st = SUB_STATE[s.state]
         return (
           <div
             key={s.path}
             className="sb-item"
+            style={{ paddingLeft: 22 + (s.depth ?? 0) * 12 }}
             title={`${s.path}\n${s.url}\n${st.label}${s.describe ? ` (${s.describe})` : ''}`}
             onDoubleClick={() => (s.state === 'uninitialized' ? repo.exec(() => api.submoduleUpdate([s.path], { init: true })) : open(s.path))}
             onContextMenu={(e) => {
@@ -225,7 +210,7 @@ function SubmoduleSection() {
             }}
           >
             <span className={`dot ${st.cls}`} />
-            <span className="ellipsis">{s.path}</span>
+            <span className="ellipsis">{(s.depth ?? 0) > 0 ? s.path.split('/').pop() : s.path}</span>
             <span className="ab">{s.sha.slice(0, 7)}</span>
           </div>
         )

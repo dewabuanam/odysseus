@@ -358,3 +358,43 @@ kbd {
 /* The logo is black ink with white fills; flip it for the chalkboard theme. */
 :root[data-theme='dark'] .tb-logo,
 :root[data-theme='dark'] .welcome-card img { filter: invert(1); }
+
+/* ---------- tabs */
+.tb-tabs { display: flex; align-items: stretch; align-self: stretch; gap: 2px; min-width: 0; flex-shrink: 1; overflow: hidden; }
+.tb-tab {
+  -webkit-app-region: no-drag; display: flex; align-items: center; gap: 6px; padding: 0 6px 0 10px; max-width: 180px; min-width: 70px;
+  cursor: pointer; font-family: var(--hand); font-size: 16px; color: var(--ink-2); border-bottom: 2px solid transparent; margin-bottom: -1.5px;
+}
+.tb-tab:hover { background: var(--hover); }
+.tb-tab.active { color: var(--ink); border-bottom-color: var(--ink); background: var(--paper); }
+.tb-tab-close { border: 0; background: none; cursor: pointer; color: var(--ink-3); font-size: 15px; line-height: 1; padding: 0 3px; border-radius: 3px; visibility: hidden; }
+.tb-tab:hover .tb-tab-close, .tb-tab.active .tb-tab-close { visibility: visible; }
+.tb-tab-close:hover { background: var(--sel); color: var(--ink); }
+.tb-newtab { font-size: 18px; padding: 0 8px; color: var(--ink-3); }
+.spinner.tiny { width: 9px; height: 9px; border-width: 1.5px; }
+
+/* ---------- menus: submenus */
+.ctx-item { display: flex; align-items: center; gap: 12px; position: relative; }
+.ctx-item.open { background: var(--sel); }
+.ctx-arrow { color: var(--ink-3); }
+
+/* ---------- console queue */
+.run-group { padding: 6px 10px 2px; font-family: var(--hand); font-size: 14px; color: var(--ink-3); }
+.run-item.old { opacity: 0.7; }
+.dot.queued { border-style: dashed; background: transparent; }
+.fail-text { font-weight: 700; text-decoration: underline wavy; text-underline-offset: 3px; }
+
+/* ---------- branch views */
+.sb-item.hidden-ref { opacity: 0.45; text-decoration: line-through; text-decoration-color: var(--ink-3); }
+.scope-banner { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-bottom: 1px dashed var(--line); background-image: repeating-linear-gradient(-45deg, var(--shade) 0 2px, transparent 2px 6px); font-size: 12px; }
+
+/* ---------- conflicts: ours shaded, theirs hatched, markers inverted */
+.dl.cf-ours { background: var(--shade); }
+.dl.cf-base { background: var(--shade); opacity: 0.7; }
+.dl.cf-theirs { background-image: repeating-linear-gradient(45deg, var(--hatch-soft) 0 1px, transparent 1px 6px); }
+.dl.cf-marker { background: var(--ink); color: var(--paper); font-weight: 700; }
+.dl.cf-marker .no { color: var(--paper); opacity: 0.7; }
+
+/* ---------- native controls follow the theme (chalkboard dropdowns were white-on-white) */
+select.input, input.input, .textarea { background-color: var(--paper); color: var(--ink); }
+select.input option, select option { background: var(--paper); color: var(--ink); }

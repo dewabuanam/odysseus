@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import type { Commit, GraphRow, WorkingStatus } from '@shared/types'
 import { relTime } from '../ui'
 
@@ -13,8 +13,12 @@ interface Props {
   graph: GraphRow[]
   status: WorkingStatus | null
   selected: string | null
+  /** Only the active tab handles arrow keys */
+  active?: boolean
+  filterRef?: React.RefObject<HTMLInputElement | null>
   onSelect(sha: string): void
   onContext(e: React.MouseEvent, c: Commit): void
+  onRefContext?(e: React.MouseEvent, name: string): void
 }
 
 const x = (lane: number) => 10 + Math.min(lane, MAX_LANES) * LANE_W
@@ -43,7 +47,7 @@ function GraphCell({ row, width, isHead }: { row: GraphRow; width: number; isHea
   )
 }
 
-export function CommitList({ commits, graph, status, selected, onSelect, onContext }: Props) {
+export function CommitList({ commits, graph, status, selected, active = true, filterRef, onSelect, onContext, onRefContext }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [scrollTop, setScrollTop] = useState(0)
   const [height, setHeight] = useState(600)
@@ -82,8 +86,9 @@ export function CommitList({ commits, graph, status, selected, onSelect, onConte
 
   // Keyboard navigation
   useEffect(() => {
+    if (!active) return
     const onKey = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).closest('input, textarea')) return
+      if ((e.target as HTMLElement).closest('input, textarea, .palette, .modal')) return
       if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
       const ids = [...(showWip ? ['working'] : []), ...rows.map((r) => r.c.sha)]
       const idx = ids.indexOf(selected ?? '')
@@ -98,9 +103,9 @@ export function CommitList({ commits, graph, status, selected, onSelect, onConte
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [rows, selected, showWip, onSelect])
+  }, [rows, selected, showWip, onSelect, active])
 
-  const items = []
+  const items: React.ReactNode[] = []
   for (let i = first; i < last; i++) {
     if (showWip && i === 0) {
       items.push(
@@ -124,53 +129,105 @@ export function CommitList({ commits, graph, status, selected, onSelect, onConte
       continue
     }
     const { c, g } = rows[i - offset]
-    const isHead = c.refs.some((r) => r.type === 'head')
     items.push(
-      <div
+      <Row
         key={c.sha}
-        className={`commit-row ${selected === c.sha ? 'selected' : ''}`}
-        style={{ top: i * ROW_H }}
-        onClick={() => onSelect(c.sha)}
-        onContextMenu={(e) => {
-          e.preventDefault()
-          onSelect(c.sha)
-          onContext(e, c)
-        }}
-      >
-        {filtered ? <div style={{ width: 10 }} /> : <GraphCell row={g} width={graphWidth} isHead={isHead} />}
-        <span className="subject">
-          {c.refs
-            .filter((r) => r.type !== 'head')
-            .map((r) => (
-              <span
-                key={r.type + r.name}
-                className={`ref ${r.type} ${isHead && r.type === 'branch' && c.refs.findIndex((x) => x.type === 'head') === c.refs.indexOf(r) - 1 ? 'head' : ''}`}
-              >
-                {r.name}
-              </span>
-            ))}
-          {isHead && !c.refs.some((r) => r.type === 'branch') && <span className="ref headref">HEAD</span>}
-          {c.subject}
-        </span>
-        <span className="author ellipsis">{c.author}</span>
-        <span className="date" title={new Date(c.date).toLocaleString()}>
-          {relTime(c.date)}
-        </span>
-      </div>
+        c={c}
+        g={g}
+        top={i * ROW_H}
+        selected={selected === c.sha}
+        filtered={filtered}
+        graphWidth={graphWidth}
+        onSelect={onSelect}
+        onContext={onContext}
+        onRefContext={onRefContext}
+      />
     )
   }
+  return renderList()
 
-  return (
-    <>
-      <div className="list-header">
-        <input className="input" placeholder="Filter commits (message, author, sha)…" value={filter} onChange={(e) => setFilter(e.target.value)} />
-        <span className="faint" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
-          {rows.length} commits
-        </span>
-      </div>
-      <div className="commit-scroll" ref={scrollRef} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
-        <div style={{ height: total * ROW_H, position: 'relative' }}>{items}</div>
-      </div>
-    </>
-  )
+  function renderList() {
+    return (
+      <>
+        <div className="list-header">
+          <input
+            ref={filterRef}
+            className="input"
+            placeholder="Filter commits (message, author, sha)…"
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                setFilter('')
+                e.currentTarget.blur()
+              }
+            }}
+          />
+          <span className="faint" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
+            {rows.length} commits
+          </span>
+        </div>
+        <div className="commit-scroll" ref={scrollRef} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
+          <div style={{ height: total * ROW_H, position: 'relative' }}>{items}</div>
+        </div>
+      </>
+    )
+  }
 }
+
+interface RowProps {
+  c: Commit
+  g: GraphRow
+  top: number
+  selected: boolean
+  filtered: boolean
+  graphWidth: number
+  onSelect(sha: string): void
+  onContext(e: React.MouseEvent, c: Commit): void
+  onRefContext?(e: React.MouseEvent, name: string): void
+}
+
+const Row = memo(function Row({ c, g, top, selected, filtered, graphWidth, onSelect, onContext, onRefContext }: RowProps) {
+  const isHead = c.refs.some((r) => r.type === 'head')
+  return (
+    <div
+      className={`commit-row ${selected ? 'selected' : ''}`}
+      style={{ top }}
+      onClick={() => onSelect(c.sha)}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        onSelect(c.sha)
+        onContext(e, c)
+      }}
+    >
+      {filtered ? <div style={{ width: 10 }} /> : <GraphCell row={g} width={graphWidth} isHead={isHead} />}
+      <span className="subject">
+        {c.refs
+          .filter((r) => r.type !== 'head')
+          .map((r) => (
+            <span
+              key={r.type + r.name}
+              className={`ref ${r.type} ${isHead && r.type === 'branch' && c.refs.findIndex((x) => x.type === 'head') === c.refs.indexOf(r) - 1 ? 'head' : ''}`}
+              onContextMenu={
+                r.type === 'branch' || r.type === 'remote'
+                  ? (e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      onRefContext?.(e, r.name)
+                    }
+                  : undefined
+              }
+            >
+              {r.name}
+            </span>
+          ))}
+        {isHead && !c.refs.some((r) => r.type === 'branch') && <span className="ref headref">HEAD</span>}
+        {c.subject}
+      </span>
+      <span className="author ellipsis">{c.author}</span>
+      <span className="date" title={new Date(c.date).toLocaleString()}>
+        {relTime(c.date)}
+      </span>
+    </div>
+  )
+})
