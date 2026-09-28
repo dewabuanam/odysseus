@@ -15,7 +15,7 @@ import {
   removeRecent,
   setSettings
 } from './store'
-import type { FileDiff, HookName, Settings } from '@shared/types'
+import type { FetchOptions, FileDiff, HookName, MergeOptions, PullOptions, Settings, StashOptions } from '@shared/types'
 
 let win: BrowserWindow | null = null
 let repo: GitRepo | null = null
@@ -76,6 +76,8 @@ function classify(f: string): 'status' | 'refs' | 'hooks' | null {
   if (f === '.git/index') return 'status'
   if (f.startsWith('.git/hooks')) return 'hooks'
   if (/^\.git\/(HEAD|refs|packed-refs|MERGE_HEAD|CHERRY_PICK_HEAD|REVERT_HEAD|rebase-|FETCH_HEAD|config)/.test(f)) return 'refs'
+  // A submodule's HEAD moving changes the parent's submodule state.
+  if (/^\.git\/modules\/.+\/(HEAD|refs)/.test(f)) return 'refs'
   return null
 }
 
@@ -187,8 +189,8 @@ const api: Record<string, Handler> = {
   checkoutRemote: (ref: string) => requireRepo().checkoutRemote(ref),
   createBranch: (n: string, s?: string, c?: boolean) => requireRepo().createBranch(n, s, c),
   deleteBranch: (n: string, f?: boolean) => requireRepo().deleteBranch(n, f),
-  merge: (ref: string, noVerify?: boolean) => requireRepo().merge(ref, noVerify),
-  rebase: (onto: string) => requireRepo().rebase(onto),
+  merge: (ref: string, opts?: MergeOptions | boolean) => requireRepo().merge(ref, opts),
+  rebase: (onto: string, autostash?: boolean) => requireRepo().rebase(onto, autostash),
   abortOperation: (op: string) => requireRepo().abortOperation(op),
   continueOperation: (op: string) => requireRepo().continueOperation(op),
   cherryPick: (sha: string) => requireRepo().cherryPick(sha),
@@ -196,12 +198,21 @@ const api: Record<string, Handler> = {
   reset: (sha: string, mode: 'soft' | 'mixed' | 'hard') => requireRepo().reset(sha, mode),
   createTag: (n: string, sha: string, m?: string) => requireRepo().createTag(n, sha, m),
   deleteTag: (n: string) => requireRepo().deleteTag(n),
-  fetch: () => requireRepo().fetch(),
-  pull: (rebase?: boolean) => requireRepo().pull(rebase),
+  fetch: (o?: FetchOptions) => requireRepo().fetch(o),
+  pull: (o?: PullOptions | boolean) => requireRepo().pull(o),
   push: (o) => requireRepo().push(o),
-  stash: (m?: string) => requireRepo().stash(m),
+  stash: (o?: StashOptions | string) => requireRepo().stash(o),
   stashApply: (ref: string, pop: boolean) => requireRepo().stashApply(ref, pop),
   stashDrop: (ref: string) => requireRepo().stashDrop(ref),
+
+  // submodules
+  submodules: () => requireRepo().submodules(),
+  superproject: () => requireRepo().superproject(),
+  submoduleUpdate: (paths?: string[], o?: { init?: boolean; remote?: boolean }) => requireRepo().submoduleUpdate(paths, o),
+  submoduleSync: () => requireRepo().submoduleSync(),
+  submoduleAdd: (url: string, path: string, branch?: string) => requireRepo().submoduleAdd(url, path, branch),
+  submoduleDeinit: (path: string) => requireRepo().submoduleDeinit(path),
+  submodulePath: (path: string) => join(requireRepo().root, path),
 
   // hooks
   hooksOverview: () => requireHooks().overview(),

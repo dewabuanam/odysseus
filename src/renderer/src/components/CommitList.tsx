@@ -5,17 +5,8 @@ import { relTime } from '../ui'
 const ROW_H = 26
 const LANE_W = 14
 const MAX_LANES = 14
-// Monochrome lanes: told apart by pencil pressure (shade) and dash pattern instead of color.
-const LANES = [
-  { c: 'var(--ink)', d: undefined },
-  { c: 'var(--ink-2)', d: '5 3' },
-  { c: 'var(--ink)', d: '1.5 3' },
-  { c: 'var(--ink-3)', d: undefined },
-  { c: 'var(--ink-2)', d: '8 3 2 3' },
-  { c: 'var(--ink)', d: '4 4' },
-  { c: 'var(--ink-3)', d: '6 2' },
-  { c: 'var(--ink-2)', d: undefined }
-]
+// Colored-pencil lanes: the one splash of color in the paper theme (see --lane-* tokens).
+const LANES = Array.from({ length: 8 }, (_, i) => ({ c: `var(--lane-${i})`, d: undefined as string | undefined }))
 
 interface Props {
   commits: Commit[]
@@ -35,18 +26,18 @@ function GraphCell({ row, width, isHead }: { row: GraphRow; width: number; isHea
   return (
     <svg width={width} height={ROW_H} style={{ flexShrink: 0 }}>
       {row.top.map((e, i) => (
-        <path key={`t${i}`} d={path(x(e.fromLane), 0, x(e.toLane), mid)} stroke={LANES[e.color].c} strokeDasharray={LANES[e.color].d} strokeWidth={1.6} strokeLinecap="round" fill="none" />
+        <path key={`t${i}`} d={path(x(e.fromLane), 0, x(e.toLane), mid)} stroke={LANES[e.color].c} strokeDasharray={LANES[e.color].d} strokeWidth={2} strokeLinecap="round" fill="none" opacity={0.85} />
       ))}
       {row.bottom.map((e, i) => (
-        <path key={`b${i}`} d={path(x(e.fromLane), mid, x(e.toLane), ROW_H)} stroke={LANES[e.color].c} strokeDasharray={LANES[e.color].d} strokeWidth={1.6} strokeLinecap="round" fill="none" />
+        <path key={`b${i}`} d={path(x(e.fromLane), mid, x(e.toLane), ROW_H)} stroke={LANES[e.color].c} strokeDasharray={LANES[e.color].d} strokeWidth={2} strokeLinecap="round" fill="none" opacity={0.85} />
       ))}
       <circle
         cx={x(row.lane)}
         cy={mid}
         r={isHead ? 5 : 4}
-        fill={isHead ? 'var(--ink)' : 'var(--paper)'}
-        stroke="var(--ink)"
-        strokeWidth={1.6}
+        fill={isHead ? LANES[row.color].c : 'var(--paper)'}
+        stroke={LANES[row.color].c}
+        strokeWidth={2}
       />
     </svg>
   )

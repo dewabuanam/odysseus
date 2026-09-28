@@ -130,6 +130,8 @@ export function Sidebar({ selected, view, onSelectWorking, onShowHooks }: Props)
         )
       })}
 
+      <SubmoduleSection />
+
       <Section title="Tags" count={tags.length} defaultOpen={false}>
         {tags.map((t) => (
           <div
@@ -174,5 +176,60 @@ export function Sidebar({ selected, view, onSelectWorking, onShowHooks }: Props)
         ))}
       </Section>
     </div>
+  )
+}
+
+const SUB_STATE: Record<string, { cls: string; label: string }> = {
+  ok: { cls: 'ok', label: 'up to date' },
+  modified: { cls: 'warn', label: 'checked out at a different commit' },
+  uninitialized: { cls: 'off', label: 'not initialized' },
+  conflict: { cls: 'fail', label: 'conflict' }
+}
+
+function SubmoduleSection() {
+  const repo = useRepo()
+  const ui = useUi()
+  const subs = repo.submodules
+  if (!subs.length) return null
+  const open = async (path: string) => repo.openRepo(await api.submodulePath(path))
+  return (
+    <Section title="Submodules" count={subs.length}>
+      {subs.map((s) => {
+        const st = SUB_STATE[s.state]
+        return (
+          <div
+            key={s.path}
+            className="sb-item"
+            title={`${s.path}\n${s.url}\n${st.label}${s.describe ? ` (${s.describe})` : ''}`}
+            onDoubleClick={() => (s.state === 'uninitialized' ? repo.exec(() => api.submoduleUpdate([s.path], { init: true })) : open(s.path))}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              ui.menu(e, [
+                { label: 'Open submodule', disabled: s.state === 'uninitialized', action: () => open(s.path) },
+                { label: s.state === 'uninitialized' ? 'Initialize & update' : 'Update to recorded commit', action: () => repo.exec(() => api.submoduleUpdate([s.path], { init: true }), 'Submodule updated') },
+                { label: 'Update to latest remote', action: () => repo.exec(() => api.submoduleUpdate([s.path], { init: true, remote: true }), 'Submodule updated') },
+                { separator: true, label: '' },
+                { label: 'Copy path', action: () => navigator.clipboard.writeText(s.path) },
+                { label: 'Copy URL', action: () => navigator.clipboard.writeText(s.url) },
+                { separator: true, label: '' },
+                {
+                  label: 'Deinitialize…',
+                  danger: true,
+                  disabled: s.state === 'uninitialized',
+                  action: async () => {
+                    const r = await ui.ask({ title: `Deinitialize ${s.path}?`, message: 'Removes the checked-out submodule files. Uncommitted changes inside it are lost.', confirmLabel: 'Deinitialize', danger: true })
+                    if (r) repo.exec(() => api.submoduleDeinit(s.path))
+                  }
+                }
+              ])
+            }}
+          >
+            <span className={`dot ${st.cls}`} />
+            <span className="ellipsis">{s.path}</span>
+            <span className="ab">{s.sha.slice(0, 7)}</span>
+          </div>
+        )
+      })}
+    </Section>
   )
 }

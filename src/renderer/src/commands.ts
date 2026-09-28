@@ -3,16 +3,25 @@ import type {
   CommandResult,
   Commit,
   HooksOverview,
+  Remote,
   RepoSummary,
   Stash,
+  Submodule,
   Tag,
   WorkingStatus
 } from '@shared/types'
 import { api } from './api'
-import type { Cmd, Step } from './palette'
+import type { Cmd, Step, Suggestion } from './palette'
 import type { AskOptions, AskResult } from './ui'
 
-export type CommitAction = 'focus' | 'commit' | 'commit-no-verify' | 'amend'
+export interface CommitRequest {
+  message: string
+  amend?: boolean
+  noVerify?: boolean
+  signoff?: boolean
+}
+
+export type CommitAction = 'focus' | 'commit' | 'commit-no-verify' | 'amend' | CommitRequest
 
 export interface CommandDeps {
   repo: RepoSummary | null
@@ -20,8 +29,11 @@ export interface CommandDeps {
   branches: Branch[]
   tags: Tag[]
   stashes: Stash[]
+  remotes: Remote[]
   commits: Commit[]
   hooks: HooksOverview | null
+  submodules: Submodule[]
+  superproject: string | null
   exec(fn: () => Promise<CommandResult>, success?: string): Promise<CommandResult>
   mutate(fn: () => Promise<unknown>): Promise<boolean>
   ask(o: AskOptions): Promise<AskResult | null>
@@ -38,23 +50,84 @@ export interface CommandDeps {
   refresh(): void
 }
 
-const input = (placeholder: string, submit: (v: string) => void | Step | Promise<void | Step>, value?: string): Step => ({
-  kind: 'input',
-  placeholder,
-  value,
-  submit
-})
+// ------------------------------------------------------------------ step helpers
 
-const list = (placeholder: string, items: Cmd[]): Step => ({ kind: 'list', placeholder, items })
+type Next = void | Step | Promise<void | Step>
 
-export function branchPicker(d: CommandDeps, placeholder: string, pick: (b: Branch) => void, opts: { remote?: boolean; excludeCurrent?: boolean } = {}): Step {
+const list = (placeholder: string, items: Cmd[], title?: string): Step => ({ kind: 'list', placeholder, items, title })
+
+const input = (
+  placeholder: string,
+  submit: (v: string) => Next,
+  opts: { value?: string; suggestions?: Suggestion[]; title?: string; allowEmpty?: boolean } = {}
+): Step => ({ kind: 'input', placeholder, submit, ...opts })
+
+/** A list of variants of one git command; each shows the exact command line it runs. */
+const options = (placeholder: string, items: { id: string; title: string; cmdline: string; detail?: string; run(): Next }[]): Step =>
+  list(placeholder, items)
+
+const draftKey = (root: string) => `odysseus.draft.${root}`
+function readDraft(root: string): string {
+  try {
+    return localStorage.getItem(draftKey(root)) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+const CONVENTIONAL: Suggestion[] = [
+  { value: 'feat: ', detail: 'a new feature' },
+  { value: 'fix: ', detail: 'a bug fix' },
+  { value: 'chore: ', detail: 'tooling, deps, housekeeping' },
+  { value: 'refactor: ', detail: 'code change without behaviour change' },
+  { value: 'docs: ', detail: 'documentation only' },
+  { value: 'test: ', detail: 'adding or fixing tests' },
+  { value: 'perf: ', detail: 'performance improvement' },
+  { value: 'style: ', detail: 'formatting, whitespace' },
+  { value: 'ci: ', detail: 'CI configuration' },
+  { value: 'build: ', detail: 'build system' }
+]
+
+const BRANCH_PREFIXES: Suggestion[] = [
+  { value: 'feature/', detail: 'new feature' },
+  { value: 'fix/', detail: 'bug fix' },
+  { value: 'hotfix/', detail: 'urgent production fix' },
+  { value: 'chore/', detail: 'maintenance' },
+  { value: 'release/', detail: 'release preparation' },
+  { value: 'experiment/', detail: 'throwaway exploration' }
+]
+
+/** Next semantic versions after the newest tag that looks like one. */
+function nextVersions(tags: Tag[]): Suggestion[] {
+  const semver = tags.map((t) => t.name.match(/^(v?)(\d+)\.(\d+)\.(\d+)$/)).find(Boolean)
+  if (!semver) return [{ value: 'v0.1.0', detail: 'first release' }, { value: 'v1.0.0', detail: 'first stable release' }]
+  const [, v, a, b, c] = semver
+  const [maj, min, pat] = [Number(a), Number(b), Number(c)]
+  return [
+    { value: `${v}${maj}.${min}.${pat + 1}`, detail: `patch after ${semver[0]}` },
+    { value: `${v}${maj}.${min + 1}.0`, detail: `minor after ${semver[0]}` },
+    { value: `${v}${maj + 1}.0.0`, detail: `major after ${semver[0]}` }
+  ]
+}
+
+const repoName = (url: string) => url.replace(/\/+$/, '').replace(/\.git$/, '').split(/[/:\\]/).pop() || 'module'
+
+// ------------------------------------------------------------------ pickers
+
+export function branchPicker(
+  d: CommandDeps,
+  placeholder: string,
+  pick: (b: Branch) => Next,
+  opts: { remote?: boolean; excludeCurrent?: boolean; cmd?: (b: Branch) => string } = {}
+): Step {
   const items = d.branches
     .filter((b) => (opts.remote ?? true) || !b.remote)
     .filter((b) => !(opts.excludeCurrent && b.current))
     .map<Cmd>((b) => ({
       id: b.fullRef,
       title: b.name,
-      detail: b.current ? 'current' : b.remote ? 'remote' : b.upstream ? `→ ${b.upstream}` : undefined,
+      detail: b.current ? 'current' : b.remote ? 'remote' : b.upstream ? `tracks ${b.upstream}` : undefined,
+      cmdline: opts.cmd?.(b),
       run: () => pick(b)
     }))
   return list(placeholder, items)
@@ -64,138 +137,347 @@ export function recentPicker(d: CommandDeps): Promise<Step> {
   return api.recentRepos().then((recent) =>
     list(
       'Open recent repository',
-      recent.map((r) => ({ id: r.path, title: r.name, detail: r.path, run: () => d.openRepo(r.path) }))
+      recent.map((r) => ({ id: r.path, title: r.name, detail: r.path, run: () => d.openRepo(r.path) })),
+      'Open Recent'
     )
   )
 }
+
+// ------------------------------------------------------------------ commands
 
 export function buildCommands(d: CommandDeps): Cmd[] {
   const has = !!d.repo
   const s = d.status
   const current = d.branches.find((b) => b.current)
+  const cur = current?.name ?? 'HEAD'
   const op = s?.operation ?? null
   const dirty = !!s && s.staged.length + s.unstaged.length + s.conflicted.length > 0
+  const remote = current?.upstream?.split('/')[0] ?? d.remotes[0]?.name ?? 'origin'
+  const initialized = d.submodules.filter((m) => m.state !== 'uninitialized')
 
-  const checkout = (b: Branch) => (b.remote ? d.exec(() => api.checkoutRemote(b.name)) : d.exec(() => api.checkout(b.name)))
+  // ---------------------------------------------------------------- flows
 
-  const push = async (force = false, noVerify = false) => {
-    if (!current) return d.toast('Not on a branch', true)
-    if (force) {
-      const r = await d.ask({ title: `Force push ${current.name}?`, message: 'Uses --force-with-lease: refuses if the remote has commits you have not fetched.', confirmLabel: 'Force push', danger: true })
-      if (!r) return
+  const commitFlow = (): Step => {
+    const message = (req: Omit<CommitRequest, 'message'>, label: string) => async (): Promise<Step> => {
+      const draft = readDraft(d.repo!.path)
+      const last = req.amend ? await api.lastCommitMessage() : ''
+      const value = draft.split('\n')[0] || last.split('\n')[0]
+      const suggestions = [...(last ? [{ value: last.split('\n')[0], detail: 'last commit message' }] : []), ...CONVENTIONAL]
+      return input(
+        req.amend ? 'Amended commit message' : 'Commit message (summary line)',
+        (msg) => {
+          // Keep any body lines from the draft when the summary is edited in the palette.
+          const body = draft.split('\n').slice(1).join('\n').trim()
+          d.commitAction({ ...req, message: body && draft.split('\n')[0] === value ? `${msg}\n\n${body}` : msg })
+        },
+        { value, suggestions, title: label }
+      )
     }
-    const remotes = await api.remotes()
-    const remote = remotes[0]?.name ?? 'origin'
-    d.exec(
-      () => api.push(current.upstream ? { force, noVerify } : { remote, branch: current.name, setUpstream: true, force, noVerify }),
-      current.upstream ? 'Pushed' : `Pushed and tracking ${remote}/${current.name}`
+    return options('How do you want to commit?', [
+      { id: 'c', title: 'Commit staged changes', cmdline: 'git commit', detail: `${s?.staged.length ?? 0} file(s)`, run: message({}, 'Commit') },
+      { id: 'a', title: 'Amend last commit', cmdline: 'git commit --amend', run: message({ amend: true }, 'Amend') },
+      { id: 's', title: 'Commit with sign-off', cmdline: 'git commit --signoff', run: message({ signoff: true }, 'Sign-off') },
+      { id: 'n', title: 'Commit without hooks', cmdline: 'git commit --no-verify', detail: 'skips pre-commit and commit-msg', run: message({ noVerify: true }, 'No hooks') }
+    ])
+  }
+
+  const pushFlow = (): Step => {
+    const branch = current?.name
+    const upstream = current?.upstream
+    const items = [
+      upstream
+        ? { id: 'p', title: `Push ${branch} to ${upstream}`, cmdline: 'git push', run: () => { d.exec(() => api.push({}), 'Pushed') } }
+        : {
+            id: 'p',
+            title: `Push ${branch ?? 'HEAD'} and track ${remote}/${branch ?? ''}`,
+            cmdline: `git push -u ${remote} ${branch ?? ''}`,
+            run: () => { if (branch) d.exec(() => api.push({ remote, branch, setUpstream: true }), 'Pushed') }
+          },
+      ...d.remotes
+        .filter((r) => r.name !== remote)
+        .map((r) => ({ id: `r-${r.name}`, title: `Push ${branch} to ${r.name}`, cmdline: `git push ${r.name} ${branch}`, run: () => { if (branch) d.exec(() => api.push({ remote: r.name, branch }), `Pushed to ${r.name}`) } })),
+      {
+        id: 'f',
+        title: 'Force push (with lease)',
+        cmdline: 'git push --force-with-lease',
+        detail: 'refuses if the remote has commits you have not fetched',
+        run: () =>
+          options('Really force push?', [
+            { id: 'yes', title: `Yes, force push ${branch}`, cmdline: 'git push --force-with-lease', run: () => { d.exec(() => api.push(upstream ? { force: true } : { remote, branch, setUpstream: true, force: true }), 'Force pushed') } },
+            { id: 'no', title: 'Cancel', cmdline: '', run: () => undefined }
+          ])
+      },
+      { id: 'n', title: 'Push without hooks', cmdline: 'git push --no-verify', detail: 'skips pre-push', run: () => { d.exec(() => api.push(upstream ? { noVerify: true } : { remote, branch, setUpstream: true, noVerify: true }), 'Pushed') } },
+      { id: 't', title: 'Push tags', cmdline: `git push ${remote} --tags`, run: () => { d.exec(() => api.push({ remote, tags: true }), 'Tags pushed') } }
+    ]
+    return options('Push', items)
+  }
+
+  const pullFlow = (): Step =>
+    options('Pull', [
+      { id: 'm', title: 'Pull (merge)', cmdline: 'git pull --no-rebase', run: () => { d.exec(() => api.pull({ mode: 'merge' }), 'Pulled') } },
+      { id: 'r', title: 'Pull (rebase)', cmdline: 'git pull --rebase', run: () => { d.exec(() => api.pull({ mode: 'rebase' }), 'Pulled') } },
+      { id: 'f', title: 'Pull (fast-forward only)', cmdline: 'git pull --ff-only', run: () => { d.exec(() => api.pull({ mode: 'ff-only' }), 'Pulled') } },
+      ...(d.submodules.length
+        ? [{ id: 's', title: 'Pull and update submodules', cmdline: 'git pull --recurse-submodules', run: () => { d.exec(() => api.pull({ recurseSubmodules: true }), 'Pulled') } }]
+        : [])
+    ])
+
+  const fetchFlow = (): Step =>
+    options('Fetch', [
+      { id: 'a', title: 'Fetch all remotes', cmdline: 'git fetch --all --prune', run: () => { d.exec(() => api.fetch(), 'Fetched') } },
+      ...d.remotes.map((r) => ({ id: `r-${r.name}`, title: `Fetch ${r.name}`, cmdline: `git fetch ${r.name} --prune`, detail: r.url, run: () => { d.exec(() => api.fetch({ remote: r.name }), `Fetched ${r.name}`) } })),
+      { id: 't', title: 'Fetch all tags', cmdline: 'git fetch --all --tags', run: () => { d.exec(() => api.fetch({ tags: true }), 'Fetched tags') } },
+      ...(d.submodules.length
+        ? [{ id: 's', title: 'Fetch including submodules', cmdline: 'git fetch --all --recurse-submodules', run: () => { d.exec(() => api.fetch({ recurseSubmodules: true }), 'Fetched') } }]
+        : [])
+    ])
+
+  const newBranchFlow = (startPoint?: string): Step => {
+    const existing = new Set(d.branches.map((b) => b.name))
+    return input(
+      `New branch name (from ${startPoint?.slice(0, 8) ?? cur})`,
+      (raw) => {
+        const name = raw.trim().replace(/\s+/g, '-')
+        if (existing.has(name)) {
+          d.toast(`Branch ${name} already exists`, true)
+          return
+        }
+        return options(`Create ${name}`, [
+          { id: 'co', title: 'Create and check out', cmdline: `git checkout -b ${name}`, run: () => { d.exec(() => api.createBranch(name, startPoint, true)) } },
+          { id: 'b', title: 'Create only', cmdline: `git branch ${name}`, run: () => { d.exec(() => api.createBranch(name, startPoint, false), `Created ${name}`) } }
+        ])
+      },
+      { suggestions: BRANCH_PREFIXES, title: 'New Branch' }
     )
   }
 
-  const cmds: Cmd[] = [
-    // ---------------------------------------------------------------- repository
-    { id: 'repo.open', title: 'Repository: Open…', keys: 'Mod+O', run: () => api.pickRepo().then((dir) => { if (dir) d.openRepo(dir) }) },
+  const mergeFlow = (): Step =>
+    branchPicker(
+      d,
+      `Merge which branch into ${cur}?`,
+      (b) =>
+        options(`Merge ${b.name} into ${cur}`, [
+          { id: 'm', title: 'Merge', cmdline: `git merge ${b.name}`, run: () => { d.exec(() => api.merge(b.name)) } },
+          { id: 'nf', title: 'Merge, always create a merge commit', cmdline: `git merge --no-ff ${b.name}`, run: () => { d.exec(() => api.merge(b.name, { noFf: true })) } },
+          { id: 'ff', title: 'Fast-forward only', cmdline: `git merge --ff-only ${b.name}`, run: () => { d.exec(() => api.merge(b.name, { ffOnly: true })) } },
+          { id: 'sq', title: 'Squash into staged changes', cmdline: `git merge --squash ${b.name}`, run: () => { d.exec(() => api.merge(b.name, { squash: true })) } },
+          { id: 'nv', title: 'Merge without hooks', cmdline: `git merge --no-verify ${b.name}`, run: () => { d.exec(() => api.merge(b.name, { noVerify: true })) } }
+        ]),
+      { excludeCurrent: true }
+    )
+
+  const rebaseFlow = (): Step =>
+    branchPicker(
+      d,
+      `Rebase ${cur} onto which branch?`,
+      (b) =>
+        options(`Rebase ${cur} onto ${b.name}`, [
+          { id: 'r', title: 'Rebase', cmdline: `git rebase ${b.name}`, run: () => { d.exec(() => api.rebase(b.name)) } },
+          { id: 'a', title: 'Rebase, stashing local changes around it', cmdline: `git rebase --autostash ${b.name}`, run: () => { d.exec(() => api.rebase(b.name, true)) } }
+        ]),
+      { excludeCurrent: true }
+    )
+
+  const stashFlow = (): Step => {
+    const message = (opts: { includeUntracked: boolean; keepIndex?: boolean }) => (): Step =>
+      input('Stash message', (m) => { d.exec(() => api.stash({ ...opts, message: m || undefined }), 'Stashed') }, { value: `WIP on ${cur}`, allowEmpty: true, title: 'Message' })
+    return options('What to stash?', [
+      { id: 'all', title: 'Everything, including untracked files', cmdline: 'git stash push -u', run: message({ includeUntracked: true }) },
+      { id: 'tracked', title: 'Tracked changes only', cmdline: 'git stash push', run: message({ includeUntracked: false }) },
+      { id: 'keep', title: 'Everything, but keep staged changes in place', cmdline: 'git stash push -u --keep-index', run: message({ includeUntracked: true, keepIndex: true }) }
+    ])
+  }
+
+  const stashManageFlow = (): Step =>
+    list(
+      'Which stash?',
+      d.stashes.map((x) => ({
+        id: x.ref,
+        title: x.message,
+        detail: x.ref,
+        run: () =>
+          options(x.ref, [
+            { id: 'pop', title: 'Pop (apply and remove)', cmdline: `git stash pop ${x.ref}`, run: () => { d.exec(() => api.stashApply(x.ref, true)) } },
+            { id: 'apply', title: 'Apply (keep stash)', cmdline: `git stash apply ${x.ref}`, run: () => { d.exec(() => api.stashApply(x.ref, false)) } },
+            { id: 'drop', title: 'Drop (delete stash)', cmdline: `git stash drop ${x.ref}`, run: () => { d.exec(() => api.stashDrop(x.ref)) } }
+          ])
+      })),
+      'Stashes'
+    )
+
+  const tagFlow = (sha = 'HEAD'): Step =>
+    input(
+      `Tag name for ${sha === 'HEAD' ? 'HEAD' : sha.slice(0, 8)}`,
+      (name) =>
+        options(`Create ${name}`, [
+          { id: 'l', title: 'Lightweight tag', cmdline: `git tag ${name}`, run: () => { d.exec(() => api.createTag(name, sha), `Tagged ${name}`) } },
+          {
+            id: 'a',
+            title: 'Annotated tag, with a message',
+            cmdline: `git tag -a ${name} -m …`,
+            run: () => input('Tag message', (m) => { d.exec(() => api.createTag(name, sha, m), `Tagged ${name}`) }, { value: name, title: 'Message' })
+          }
+        ]),
+      { suggestions: nextVersions(d.tags), title: 'Tag' }
+    )
+
+  const deleteBranchFlow = (): Step =>
+    branchPicker(
+      d,
+      'Delete which branch?',
+      (b) =>
+        options(`Delete ${b.name}`, [
+          { id: 'd', title: 'Delete (only if merged)', cmdline: `git branch -d ${b.name}`, run: () => { d.exec(() => api.deleteBranch(b.name, false), `Deleted ${b.name}`) } },
+          { id: 'D', title: 'Force delete (even if not merged)', cmdline: `git branch -D ${b.name}`, run: () => { d.exec(() => api.deleteBranch(b.name, true), `Deleted ${b.name}`) } }
+        ]),
+      { remote: false, excludeCurrent: true }
+    )
+
+  const submoduleUpdateFlow = (): Step => {
+    const variants = (paths: string[], label: string) =>
+      options(label, [
+        { id: 'rec', title: 'Update to the recorded commit', cmdline: `git submodule update --init --recursive${paths.length ? ` -- ${paths[0]}` : ''}`, run: () => { d.exec(() => api.submoduleUpdate(paths, { init: true }), 'Submodules updated') } },
+        { id: 'rem', title: 'Update to the latest remote commit', cmdline: `git submodule update --init --recursive --remote${paths.length ? ` -- ${paths[0]}` : ''}`, run: () => { d.exec(() => api.submoduleUpdate(paths, { init: true, remote: true }), 'Submodules updated') } }
+      ])
+    return list(
+      'Which submodule?',
+      [
+        { id: '*', title: 'All submodules', detail: `${d.submodules.length}`, run: () => variants([], 'All submodules') },
+        ...d.submodules.map((m) => ({ id: m.path, title: m.path, detail: m.state, run: () => variants([m.path], m.path) }))
+      ],
+      'Update'
+    )
+  }
+
+  const submoduleAddFlow = (): Step =>
+    input(
+      'Repository URL or local path',
+      (url) => {
+        const name = repoName(url)
+        return input(
+          'Path inside this repository',
+          (path) => { d.exec(() => api.submoduleAdd(url, path), `Added submodule ${path}`) },
+          { value: name, title: name, suggestions: [{ value: name }, { value: `vendor/${name}` }, { value: `libs/${name}` }, { value: `external/${name}` }] }
+        )
+      },
+      { title: 'Add Submodule' }
+    )
+
+  const openSubmodule = async (m: Submodule) => d.openRepo(await api.submodulePath(m.path))
+
+  // ---------------------------------------------------------------- table
+
+  return [
+    // repository
+    { id: 'repo.open', title: 'Repository: Open…', keys: 'Mod+O', run: () => { api.pickRepo().then((dir) => { if (dir) d.openRepo(dir) }) } },
     { id: 'repo.recent', title: 'Repository: Open Recent…', keys: 'Mod+Shift+O', run: () => recentPicker(d) },
-    { id: 'repo.clone', title: 'Repository: Clone…', run: () => input('Repository URL to clone', (url) => { api.cloneRepo(url).then((r) => r && d.openRepo(r.path)).catch((e) => d.toast(e.message, true)) }) },
+    { id: 'repo.clone', title: 'Repository: Clone…', run: () => input('Repository URL to clone', (url) => { api.cloneRepo(url).then((r) => r && d.openRepo(r.path)).catch((e) => d.toast(e.message, true)) }, { title: 'Clone' }) },
     { id: 'repo.init', title: 'Repository: New (git init)…', run: () => { api.initRepo().then((r) => r && d.openRepo(r.path)).catch((e) => d.toast(e.message, true)) } },
+    { id: 'repo.parent', title: 'Repository: Open Parent (superproject)', when: !!d.superproject, run: () => d.openRepo(d.superproject!) },
     { id: 'repo.reveal', title: 'Repository: Show in File Manager', when: has, run: () => { api.openExternal(d.repo!.path) } },
     { id: 'repo.close', title: 'Repository: Close', when: has, run: () => d.closeRepo() },
 
-    // ---------------------------------------------------------------- commit
-    { id: 'commit.focus', title: 'Commit: Write Message', detail: 'focus the commit box', keys: 'Mod+Shift+C', when: has, run: () => d.commitAction('focus') },
-    { id: 'commit.commit', title: 'Commit: Commit Staged', keys: 'Mod+Enter', when: has && !!s?.staged.length, run: () => d.commitAction('commit') },
-    { id: 'commit.noverify', title: 'Commit: Commit Without Hooks (--no-verify)', when: has && !!s?.staged.length, run: () => d.commitAction('commit-no-verify') },
-    { id: 'commit.amend', title: 'Commit: Toggle Amend Last Commit', when: has, run: () => d.commitAction('amend') },
-    { id: 'stage.all', title: 'Stage: Stage All', keys: 'Mod+Shift+A', when: has && !!s?.unstaged.length, run: () => { d.mutate(() => api.stageAll()) } },
-    { id: 'stage.none', title: 'Stage: Unstage All', keys: 'Mod+Shift+U', when: has && !!s?.staged.length, run: () => { d.mutate(() => api.unstageAll()) } },
+    // commit
+    { id: 'commit', title: 'Commit…', detail: 'commit, amend, sign-off, no hooks', keys: 'Mod+K', when: has, run: commitFlow },
+    { id: 'commit.focus', title: 'Commit: Write Message in Editor', detail: 'multi-line message', keys: 'Mod+Shift+C', when: has, run: () => d.commitAction('focus') },
+    { id: 'commit.commit', title: 'Commit: Commit Staged Now', keys: 'Mod+Enter', when: has && !!s?.staged.length, run: () => d.commitAction('commit') },
+    {
+      id: 'commit.undo',
+      title: 'Commit: Undo Last Commit (keep changes)',
+      cmdline: 'git reset --soft HEAD~1',
+      when: has && d.commits.length > 1,
+      run: () => { d.exec(() => api.reset('HEAD~1', 'soft'), 'Last commit undone, changes kept staged') }
+    },
+    { id: 'stage.all', title: 'Stage: Stage All', cmdline: 'git add -A', keys: 'Mod+Shift+A', when: has && !!s?.unstaged.length, run: () => { d.mutate(() => api.stageAll()) } },
+    { id: 'stage.none', title: 'Stage: Unstage All', cmdline: 'git reset', keys: 'Mod+Shift+U', when: has && !!s?.staged.length, run: () => { d.mutate(() => api.unstageAll()) } },
     {
       id: 'stage.discard',
       title: 'Stage: Discard All Unstaged Changes…',
       when: has && !!s?.unstaged.length,
-      run: async () => {
-        const r = await d.ask({ title: 'Discard all unstaged changes?', message: 'Modified files are restored and untracked files deleted. This cannot be undone.', confirmLabel: 'Discard all', danger: true })
-        if (r && s) d.mutate(() => api.discard(s.unstaged.filter((f) => f.status !== '?').map((f) => f.path), s.unstaged.filter((f) => f.status === '?').map((f) => f.path)))
-      }
-    },
-
-    // ---------------------------------------------------------------- remote
-    { id: 'remote.fetch', title: 'Remote: Fetch All', keys: 'Alt+F', when: has, run: () => { d.exec(() => api.fetch(), 'Fetched') } },
-    { id: 'remote.pull', title: 'Remote: Pull', keys: 'Alt+L', when: has, run: () => { d.exec(() => api.pull(false), 'Pulled') } },
-    { id: 'remote.pullrebase', title: 'Remote: Pull (Rebase)', when: has, run: () => { d.exec(() => api.pull(true), 'Pulled') } },
-    { id: 'remote.push', title: 'Remote: Push', keys: 'Alt+P', when: has, run: () => { push() } },
-    { id: 'remote.pushforce', title: 'Remote: Force Push (with lease)…', when: has, run: () => { push(true) } },
-    { id: 'remote.pushnoverify', title: 'Remote: Push Without Hooks (--no-verify)', when: has, run: () => { push(false, true) } },
-
-    // ---------------------------------------------------------------- branch
-    { id: 'branch.checkout', title: 'Branch: Checkout…', keys: 'Mod+Shift+B', when: has, run: () => branchPicker(d, 'Checkout branch', checkout, { excludeCurrent: true }) },
-    {
-      id: 'branch.new',
-      title: 'Branch: New Branch…',
-      keys: 'Mod+B',
-      when: has,
-      run: () => input(`New branch from ${current?.name ?? 'HEAD'}`, (name) => { d.exec(() => api.createBranch(name.replace(/\s+/g, '-'))) })
-    },
-    { id: 'branch.merge', title: `Branch: Merge Into ${current?.name ?? 'HEAD'}…`, when: has && !op, run: () => branchPicker(d, `Merge into ${current?.name ?? 'HEAD'}`, (b) => { d.exec(() => api.merge(b.name)) }, { excludeCurrent: true }) },
-    { id: 'branch.rebase', title: `Branch: Rebase ${current?.name ?? 'HEAD'} Onto…`, when: has && !op, run: () => branchPicker(d, `Rebase ${current?.name ?? 'HEAD'} onto`, (b) => { d.exec(() => api.rebase(b.name)) }, { excludeCurrent: true }) },
-    {
-      id: 'branch.delete',
-      title: 'Branch: Delete…',
-      when: has,
       run: () =>
-        branchPicker(
-          d,
-          'Delete branch',
-          async (b) => {
-            const r = await d.ask({ title: `Delete branch ${b.name}?`, checkbox: { label: 'Force delete (even if not merged)' }, confirmLabel: 'Delete', danger: true })
-            if (r) d.exec(() => api.deleteBranch(b.name, r.checked))
+        options('Discard all unstaged changes? This cannot be undone.', [
+          {
+            id: 'yes',
+            title: 'Yes, discard everything unstaged',
+            cmdline: 'git restore . && git clean -f',
+            run: () => { if (s) d.mutate(() => api.discard(s.unstaged.filter((f) => f.status !== '?').map((f) => f.path), s.unstaged.filter((f) => f.status === '?').map((f) => f.path))) }
           },
-          { remote: false, excludeCurrent: true }
-        )
+          { id: 'no', title: 'Cancel', cmdline: '', run: () => undefined }
+        ])
     },
-    { id: 'branch.goto', title: 'Go to: Branch…', keys: 'Mod+G', when: has, run: () => branchPicker(d, 'Show branch in history', (b) => d.select(b.sha)) },
+
+    // remote
+    { id: 'remote.fetch', title: 'Remote: Fetch…', keys: 'Alt+F', when: has, run: fetchFlow },
+    { id: 'remote.pull', title: 'Remote: Pull…', keys: 'Alt+L', when: has, run: pullFlow },
+    { id: 'remote.push', title: 'Remote: Push…', keys: 'Alt+P', when: has, run: pushFlow },
+
+    // branch
+    { id: 'branch.checkout', title: 'Branch: Checkout…', keys: 'Mod+Shift+B', when: has, run: () => branchPicker(d, 'Checkout which branch?', (b) => { d.exec(() => (b.remote ? api.checkoutRemote(b.name) : api.checkout(b.name))) }, { excludeCurrent: true, cmd: (b) => (b.remote ? `git checkout --track ${b.name}` : `git checkout ${b.name}`) }) },
+    { id: 'branch.new', title: 'Branch: New Branch…', keys: 'Mod+B', when: has, run: () => newBranchFlow() },
+    { id: 'branch.merge', title: `Branch: Merge Into ${cur}…`, when: has && !op, run: mergeFlow },
+    { id: 'branch.rebase', title: `Branch: Rebase ${cur} Onto…`, when: has && !op, run: rebaseFlow },
+    { id: 'branch.delete', title: 'Branch: Delete…', when: has, run: deleteBranchFlow },
+    { id: 'branch.goto', title: 'Go to: Branch…', keys: 'Mod+G', when: has, run: () => branchPicker(d, 'Show which branch?', (b) => d.select(b.sha)) },
     {
       id: 'goto.commit',
       title: 'Go to: Commit…',
       detail: 'search history by message, author or sha',
       keys: 'Mod+Shift+G',
       when: has && d.commits.length > 0,
-      run: () =>
-        list(
-          'Find commit',
-          d.commits.slice(0, 5000).map((c) => ({ id: c.sha, title: c.subject, detail: `${c.sha.slice(0, 8)}  ${c.author}`, run: () => d.select(c.sha) }))
-        )
+      run: () => list('Find commit', d.commits.slice(0, 5000).map((c) => ({ id: c.sha, title: c.subject, detail: `${c.sha.slice(0, 8)}  ${c.author}`, run: () => d.select(c.sha) })))
     },
     { id: 'goto.working', title: 'Go to: Working Directory', keys: 'Mod+0', when: has, run: () => d.select('working') },
 
-    // ---------------------------------------------------------------- tags & stash
-    { id: 'tag.create', title: 'Tag: Create at HEAD…', when: has, run: () => input('Tag name', (name) => { d.exec(() => api.createTag(name, 'HEAD'), `Tagged ${name}`) }) },
+    // tags & stash
+    { id: 'tag.create', title: 'Tag: Create at HEAD…', when: has, run: () => tagFlow() },
     {
       id: 'tag.delete',
       title: 'Tag: Delete…',
       when: has && d.tags.length > 0,
-      run: () => list('Delete tag', d.tags.map((t) => ({ id: t.name, title: t.name, run: () => { d.exec(() => api.deleteTag(t.name)) } })))
+      run: () => list('Delete which tag?', d.tags.map((t) => ({ id: t.name, title: t.name, cmdline: `git tag -d ${t.name}`, run: () => { d.exec(() => api.deleteTag(t.name), `Deleted ${t.name}`) } })))
     },
-    { id: 'stash.push', title: 'Stash: Stash Changes…', keys: 'Alt+S', when: has && dirty, run: () => input('Stash message (optional, Enter to stash)', (m) => { d.exec(() => api.stash(m), 'Stashed') }, 'WIP') },
-    { id: 'stash.pop', title: 'Stash: Pop Latest', keys: 'Alt+Shift+S', when: has && d.stashes.length > 0, run: () => { d.exec(() => api.stashApply(d.stashes[0].ref, true)) } },
-    { id: 'stash.apply', title: 'Stash: Apply…', when: has && d.stashes.length > 0, run: () => list('Apply stash', d.stashes.map((x) => ({ id: x.ref, title: x.message, detail: x.ref, run: () => { d.exec(() => api.stashApply(x.ref, false)) } }))) },
-    { id: 'stash.drop', title: 'Stash: Drop…', when: has && d.stashes.length > 0, run: () => list('Drop stash', d.stashes.map((x) => ({ id: x.ref, title: x.message, detail: x.ref, run: () => { d.exec(() => api.stashDrop(x.ref)) } }))) },
+    { id: 'stash.push', title: 'Stash: Stash Changes…', keys: 'Alt+S', when: has && dirty, run: stashFlow },
+    { id: 'stash.pop', title: 'Stash: Pop Latest', cmdline: 'git stash pop', keys: 'Alt+Shift+S', when: has && d.stashes.length > 0, run: () => { d.exec(() => api.stashApply(d.stashes[0].ref, true)) } },
+    { id: 'stash.manage', title: 'Stash: Apply / Pop / Drop…', when: has && d.stashes.length > 0, run: stashManageFlow },
 
-    // ---------------------------------------------------------------- operations
+    // operations
     { id: 'op.continue', title: `Operation: Continue ${op ?? ''}`, when: has && !!op, run: () => { d.exec(() => api.continueOperation(op!)) } },
     { id: 'op.abort', title: `Operation: Abort ${op ?? ''}`, when: has && !!op, run: () => { d.exec(() => api.abortOperation(op!)) } },
 
-    // ---------------------------------------------------------------- hooks
+    // submodules
+    { id: 'sub.open', title: 'Submodule: Open…', when: initialized.length > 0, run: () => list('Open which submodule?', initialized.map((m) => ({ id: m.path, title: m.path, detail: m.describe ?? m.sha.slice(0, 8), run: () => { openSubmodule(m) } })), 'Open') },
+    { id: 'sub.update', title: 'Submodule: Update…', when: d.submodules.length > 0, run: submoduleUpdateFlow },
+    { id: 'sub.add', title: 'Submodule: Add…', when: has, run: submoduleAddFlow },
+    { id: 'sub.sync', title: 'Submodule: Sync URLs', cmdline: 'git submodule sync --recursive', when: d.submodules.length > 0, run: () => { d.exec(() => api.submoduleSync(), 'Submodule URLs synced') } },
+    {
+      id: 'sub.deinit',
+      title: 'Submodule: Deinitialize…',
+      when: initialized.length > 0,
+      run: () =>
+        list(
+          'Deinitialize which submodule?',
+          initialized.map((m) => ({
+            id: m.path,
+            title: m.path,
+            run: () =>
+              options(`Deinitialize ${m.path}? Local changes inside it are lost.`, [
+                { id: 'yes', title: 'Yes, deinitialize', cmdline: `git submodule deinit -f -- ${m.path}`, run: () => { d.exec(() => api.submoduleDeinit(m.path)) } },
+                { id: 'no', title: 'Cancel', cmdline: '', run: () => undefined }
+              ])
+          })),
+          'Deinit'
+        )
+    },
+
+    // hooks
     { id: 'hooks.show', title: 'Hooks: Show Hooks', keys: 'Mod+Shift+H', when: has, run: () => d.showHooks() },
     {
       id: 'hooks.run',
       title: 'Hooks: Run Hook Now…',
       detail: 'test a hook without committing',
       when: has && !!d.hooks?.hooks.some((h) => h.enabled),
-      run: () =>
-        list(
-          'Run hook',
-          d.hooks!.hooks.filter((h) => h.enabled).map((h) => ({ id: h.name, title: h.name, run: () => { d.exec(() => api.runHook(h.name, ''), `${h.name} passed`) } }))
-        )
+      run: () => list('Run which hook?', d.hooks!.hooks.filter((h) => h.enabled).map((h) => ({ id: h.name, title: h.name, cmdline: `git hook run ${h.name}`, run: () => { d.exec(() => api.runHook(h.name, ''), `${h.name} passed`) } })))
     },
     {
       id: 'hooks.toggle',
@@ -203,7 +485,7 @@ export function buildCommands(d: CommandDeps): Cmd[] {
       when: has && !!d.hooks?.hooks.some((h) => h.exists),
       run: () =>
         list(
-          'Toggle hook',
+          'Toggle which hook?',
           d.hooks!.hooks.filter((h) => h.exists).map((h) => ({
             id: h.name,
             title: h.name,
@@ -216,15 +498,45 @@ export function buildCommands(d: CommandDeps): Cmd[] {
       id: 'hooks.edit',
       title: 'Hooks: Edit Hook…',
       when: has && !!d.hooks,
-      run: () => list('Edit hook', (d.hooks?.hooks ?? []).map((h) => ({ id: h.name, title: h.name, detail: h.exists ? (h.enabled ? 'active' : 'disabled') : 'not installed', run: () => d.showHooks(h.name) })))
+      run: () => list('Edit which hook?', (d.hooks?.hooks ?? []).map((h) => ({ id: h.name, title: h.name, detail: h.exists ? (h.enabled ? 'active' : 'disabled') : 'not installed', run: () => d.showHooks(h.name) })))
     },
 
-    // ---------------------------------------------------------------- view
+    // view
     { id: 'view.console', title: 'View: Toggle Hook Console', keys: 'Mod+`', run: () => d.toggleConsole() },
     { id: 'view.sidebar', title: 'View: Toggle Sidebar', keys: 'Mod+\\', when: has, run: () => d.toggleSidebar() },
     { id: 'view.theme', title: 'View: Toggle Paper / Chalkboard Theme', run: () => d.toggleTheme() },
     { id: 'view.refresh', title: 'View: Refresh', keys: 'F5', when: has, run: () => d.refresh() },
     { id: 'app.settings', title: 'Preferences: Settings', detail: 'hook environment, PATH, timeout, diagnostics', keys: 'Mod+,', run: () => d.openSettings() }
   ]
-  return cmds
+}
+
+export { newBranchFlowFor, tagFlowFor }
+
+/** Palette flows reused by context menus (branch / tag at a specific commit). */
+function newBranchFlowFor(d: CommandDeps, sha: string): Step {
+  const existing = new Set(d.branches.map((b) => b.name))
+  return input(
+    `New branch at ${sha.slice(0, 8)}`,
+    (raw) => {
+      const name = raw.trim().replace(/\s+/g, '-')
+      if (existing.has(name)) return void d.toast(`Branch ${name} already exists`, true)
+      return options(`Create ${name}`, [
+        { id: 'co', title: 'Create and check out', cmdline: `git checkout -b ${name} ${sha.slice(0, 8)}`, run: () => { d.exec(() => api.createBranch(name, sha, true)) } },
+        { id: 'b', title: 'Create only', cmdline: `git branch ${name} ${sha.slice(0, 8)}`, run: () => { d.exec(() => api.createBranch(name, sha, false), `Created ${name}`) } }
+      ])
+    },
+    { suggestions: BRANCH_PREFIXES, title: 'New Branch' }
+  )
+}
+
+function tagFlowFor(d: CommandDeps, sha: string): Step {
+  return input(
+    `Tag name for ${sha.slice(0, 8)}`,
+    (name) =>
+      options(`Create ${name}`, [
+        { id: 'l', title: 'Lightweight tag', cmdline: `git tag ${name} ${sha.slice(0, 8)}`, run: () => { d.exec(() => api.createTag(name, sha), `Tagged ${name}`) } },
+        { id: 'a', title: 'Annotated tag, with a message', cmdline: `git tag -a ${name} -m …`, run: () => input('Tag message', (m) => { d.exec(() => api.createTag(name, sha, m), `Tagged ${name}`) }, { value: name, title: 'Message' }) }
+      ]),
+    { suggestions: nextVersions(d.tags), title: 'Tag' }
+  )
 }

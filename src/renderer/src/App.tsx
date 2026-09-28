@@ -12,11 +12,12 @@ import type {
   RunEndEvent,
   RunStartEvent,
   Stash,
+  Submodule,
   Tag,
   WorkingStatus
 } from '@shared/types'
 import { api } from './api'
-import { branchPicker, buildCommands, recentPicker, type CommandDeps, type CommitAction } from './commands'
+import { branchPicker, buildCommands, newBranchFlowFor, recentPicker, tagFlowFor, type CommandDeps, type CommitAction } from './commands'
 import { matchesKeys, Palette, type Step } from './palette'
 import { RepoContext, type RepoCtx, type RefreshScope } from './repoContext'
 import { runStore } from './runs'
@@ -52,6 +53,8 @@ function Shell() {
   const [stashes, setStashes] = useState<Stash[]>([])
   const [remotes, setRemotes] = useState<Remote[]>([])
   const [hooks, setHooks] = useState<HooksOverview | null>(null)
+  const [submodules, setSubmodules] = useState<Submodule[]>([])
+  const [superproject, setSuperproject] = useState<string | null>(null)
   const [selected, setSelected] = useState<string | null>('working')
   const [view, setView] = useState<'history' | 'hooks'>('history')
   const [hookSel, setHookSel] = useState<string>('pre-commit')
@@ -79,7 +82,7 @@ function Shell() {
           queued.current.clear()
           const jobs: Promise<unknown>[] = []
           // Ref changes can change status (checkout) so they always imply a status refresh.
-          if (want.has('status') || want.has('refs')) jobs.push(api.status().then(setStatus))
+          if (want.has('status') || want.has('refs')) jobs.push(api.status().then(setStatus), api.submodules().then(setSubmodules, () => setSubmodules([])))
           if (want.has('refs')) {
             jobs.push(
               api.log(undefined, logKey.current).then((l) => {
@@ -140,6 +143,8 @@ function Shell() {
         setStatus(null)
         setLog({ commits: [], graph: [] })
         setHooks(null)
+        setSubmodules([])
+        api.superproject().then(setSuperproject, () => setSuperproject(null))
         setSelected('working')
         setView('history')
         setRepo(r)
@@ -178,7 +183,8 @@ function Shell() {
         setConsoleOpen(true)
         ui.toast(res.failedHook ? `${res.failedHook} hook failed` : lastLine(res.stderr) || 'Command failed', true)
       }
-      await refreshRef.current(['status', 'refs'])
+      // Don't make the caller wait for the UI refresh; results (and hook failures) show at once.
+      void refreshRef.current(['status', 'refs'])
       return res
     },
     [ui]
@@ -226,8 +232,11 @@ function Shell() {
     branches,
     tags,
     stashes,
+    remotes,
     commits: log.commits,
     hooks,
+    submodules,
+    superproject,
     exec,
     mutate: (fn) => mutate(fn, ['status', 'hooks']),
     ask: ui.ask,
@@ -294,13 +303,16 @@ function Shell() {
         stashes,
         remotes,
         hooks,
+        submodules,
+        superproject,
+        openRepo,
         refresh,
         exec,
         mutate,
         openConsole: () => setConsoleOpen(true),
         select
       },
-    [repo, status, branches, tags, stashes, remotes, hooks, refresh, exec, mutate, select]
+    [repo, status, branches, tags, stashes, remotes, hooks, submodules, superproject, openRepo, refresh, exec, mutate, select]
   )
 
   if (booting) return <div className="app" />
@@ -310,12 +322,11 @@ function Shell() {
       { label: 'Checkout (detached HEAD)', action: () => exec(() => api.checkout(c.sha)) },
       {
         label: 'Create branch here…',
-        action: () =>
-          openPalette({ kind: 'input', placeholder: `New branch at ${c.sha.slice(0, 8)}`, submit: (name) => { exec(() => api.createBranch(name, c.sha, true)) } })
+        action: () => openPalette(newBranchFlowFor(depsRef.current, c.sha))
       },
       {
         label: 'Create tag here…',
-        action: () => openPalette({ kind: 'input', placeholder: `Tag name for ${c.sha.slice(0, 8)}`, submit: (name) => { exec(() => api.createTag(name, c.sha)) } })
+        action: () => openPalette(tagFlowFor(depsRef.current, c.sha))
       },
       { separator: true, label: '' },
       { label: 'Cherry-pick', action: () => exec(() => api.cherryPick(c.sha)) },
@@ -342,6 +353,8 @@ function Shell() {
       <TitleBar
         repo={repo}
         status={status}
+        parent={superproject}
+        onParent={() => superproject && openRepo(superproject)}
         onPalette={() => openPalette()}
         onRepoMenu={() => recentPicker(depsRef.current).then(openPalette)}
         onBranchMenu={() =>

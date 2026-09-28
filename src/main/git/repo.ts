@@ -1,13 +1,18 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { isAbsolute, join, resolve } from 'node:path'
 import type {
   Branch,
   CommandResult,
   Commit,
   CommitDetail,
   CommitOptions,
+  FetchOptions,
   FileDiff,
+  MergeOptions,
+  PullOptions,
+  StashOptions,
+  Submodule,
   GraphRow,
   PushOptions,
   Remote,
@@ -304,14 +309,19 @@ export class GitRepo {
     return this.run(`Delete branch ${name}`, ['branch', force ? '-D' : '-d', name])
   }
 
-  merge(ref: string, noVerify = false): Promise<CommandResult> {
-    const args = ['merge', '--no-edit', ref]
-    if (noVerify) args.splice(1, 0, '--no-verify')
+  merge(ref: string, opts: MergeOptions | boolean = {}): Promise<CommandResult> {
+    const o: MergeOptions = typeof opts === 'boolean' ? { noVerify: opts } : opts
+    const args = ['merge', '--no-edit']
+    if (o.noFf) args.push('--no-ff')
+    if (o.ffOnly) args.push('--ff-only')
+    if (o.squash) args.push('--squash')
+    if (o.noVerify) args.push('--no-verify')
+    args.push(ref)
     return this.run(`Merge ${ref}`, args)
   }
 
-  rebase(onto: string): Promise<CommandResult> {
-    return this.run(`Rebase onto ${onto}`, ['rebase', onto])
+  rebase(onto: string, autostash = false): Promise<CommandResult> {
+    return this.run(`Rebase onto ${onto}`, ['rebase', ...(autostash ? ['--autostash'] : []), onto])
   }
 
   abortOperation(op: string): Promise<CommandResult> {
@@ -345,12 +355,20 @@ export class GitRepo {
     return this.run(`Delete tag ${name}`, ['tag', '-d', name])
   }
 
-  fetch(): Promise<CommandResult> {
-    return this.run('Fetch', ['fetch', '--all', '--prune', '--progress'])
+  fetch(opts: FetchOptions = {}): Promise<CommandResult> {
+    const args = ['fetch', '--prune', '--progress']
+    if (opts.tags) args.push('--tags')
+    if (opts.recurseSubmodules) args.push('--recurse-submodules')
+    args.push(...(opts.remote ? [opts.remote] : ['--all']))
+    return this.run(opts.remote ? `Fetch ${opts.remote}` : 'Fetch', args)
   }
 
-  pull(rebase = false): Promise<CommandResult> {
-    return this.run('Pull', ['pull', rebase ? '--rebase' : '--no-rebase', '--progress'])
+  pull(opts: PullOptions | boolean = {}): Promise<CommandResult> {
+    const o: PullOptions = typeof opts === 'boolean' ? { mode: opts ? 'rebase' : 'merge' } : opts
+    const mode = o.mode ?? 'merge'
+    const args = ['pull', '--progress', mode === 'rebase' ? '--rebase' : mode === 'ff-only' ? '--ff-only' : '--no-rebase']
+    if (o.recurseSubmodules) args.push('--recurse-submodules')
+    return this.run('Pull', args)
   }
 
   push(opts: PushOptions): Promise<CommandResult> {
@@ -358,16 +376,84 @@ export class GitRepo {
     if (opts.force) args.push('--force-with-lease')
     if (opts.noVerify) args.push('--no-verify')
     if (opts.setUpstream) args.push('-u')
+    if (opts.tags) args.push('--tags')
     if (opts.remote) args.push(opts.remote)
     if (opts.branch) args.push(opts.branch)
     return this.run('Push', args)
   }
 
-  stash(message?: string, includeUntracked = true): Promise<CommandResult> {
+  stash(opts: StashOptions | string = {}): Promise<CommandResult> {
+    const o: StashOptions = typeof opts === 'string' ? { message: opts } : opts
     const args = ['stash', 'push']
-    if (includeUntracked) args.push('-u')
-    if (message) args.push('-m', message)
+    if (o.includeUntracked ?? true) args.push('-u')
+    if (o.keepIndex) args.push('--keep-index')
+    if (o.message) args.push('-m', o.message)
     return this.run('Stash', args)
+  }
+
+  // ---------------------------------------------------------------- submodules
+
+  /**
+   * Lists submodules without `git submodule status`, which walks every submodule and takes
+   * seconds on Windows. Instead: parse .gitmodules, read recorded commits with one
+   * `git ls-files --stage`, and read each checked-out commit straight from its HEAD file.
+   */
+  async submodules(): Promise<Submodule[]> {
+    const modulesFile = join(this.root, '.gitmodules')
+    if (!existsSync(modulesFile)) return []
+    const entries = parseGitmodules(readFileSync(modulesFile, 'utf8'))
+    if (!entries.length) return []
+
+    // Gitlinks (mode 160000) in the index: "<mode> <sha> <stage>\t<path>"
+    const staged = await this.data(['ls-files', '--stage', '-z', '--', ...entries.map((e) => e.path)])
+    const recorded = new Map<string, { sha: string; conflict: boolean }>()
+    for (const rec of staged.split('\0')) {
+      const m = rec.match(/^160000 ([0-9a-f]+) (\d)\t(.+)$/)
+      if (!m) continue
+      const prev = recorded.get(m[3])
+      recorded.set(m[3], { sha: m[2] === '0' ? m[1] : prev?.sha ?? m[1], conflict: m[2] !== '0' || !!prev?.conflict })
+    }
+
+    return entries.map((e) => {
+      const rec = recorded.get(e.path)
+      const head = readSubmoduleHead(join(this.root, e.path))
+      let state: Submodule['state'] = 'ok'
+      if (rec?.conflict) state = 'conflict'
+      else if (!head) state = 'uninitialized'
+      else if (rec && head !== rec.sha) state = 'modified'
+      return { name: e.name, path: e.path, url: e.url ?? '', branch: e.branch, sha: head ?? rec?.sha ?? '', state }
+    })
+  }
+
+  async superproject(): Promise<string | null> {
+    const out = await this.data(['rev-parse', '--show-superproject-working-tree']).catch(() => '')
+    return out.trim() || null
+  }
+
+  submoduleUpdate(paths: string[] = [], opts: { init?: boolean; remote?: boolean } = {}): Promise<CommandResult> {
+    const args = ['submodule', 'update', '--recursive', '--progress']
+    if (opts.init ?? true) args.push('--init')
+    if (opts.remote) args.push('--remote')
+    if (paths.length) args.push('--', ...paths)
+    return this.run(paths.length === 1 ? `Update submodule ${paths[0]}` : 'Update submodules', args)
+  }
+
+  submoduleSync(): Promise<CommandResult> {
+    return this.run('Sync submodule URLs', ['submodule', 'sync', '--recursive'])
+  }
+
+  submoduleAdd(url: string, path: string, branch?: string): Promise<CommandResult> {
+    // git >= 2.38.1 refuses file:// / local-path submodule clones by default. A local path
+    // typed by the user is an explicit choice, so allow it for this command only.
+    const local = !/^[a-z]+:\/\//i.test(url) && !/^[\w.-]+@[\w.-]+:/.test(url)
+    const args = [...(local ? ['-c', 'protocol.file.allow=always'] : []), 'submodule', 'add', '--progress']
+    if (branch) args.push('-b', branch)
+    args.push('--', url, path)
+    return this.run(`Add submodule ${path}`, args)
+  }
+
+  submoduleDeinit(path: string): Promise<CommandResult> {
+    return this.run(`Deinit submodule ${path}`, ['submodule', 'deinit', '-f', '--', path])
   }
 
   stashApply(ref: string, pop: boolean): Promise<CommandResult> {
@@ -376,5 +462,58 @@ export class GitRepo {
 
   stashDrop(ref: string): Promise<CommandResult> {
     return this.run(`Drop ${ref}`, ['stash', 'drop', ref])
+  }
+}
+
+// ------------------------------------------------------------------ submodule helpers
+
+/** Minimal .gitmodules parser: [submodule "name"] sections with path / url / branch. */
+export function parseGitmodules(text: string): { name: string; path: string; url?: string; branch?: string }[] {
+  const out: { name: string; path: string; url?: string; branch?: string }[] = []
+  let cur: Record<string, string> | null = null
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim()
+    if (!line || line.startsWith('#') || line.startsWith(';')) continue
+    const section = line.match(/^\[submodule\s+"(.+)"\]$/)
+    if (section) {
+      cur = { name: section[1] }
+      out.push(cur as never)
+      continue
+    }
+    if (line.startsWith('[')) {
+      cur = null
+      continue
+    }
+    const kv = line.match(/^([\w.-]+)\s*=\s*(.*)$/)
+    if (cur && kv) cur[kv[1].toLowerCase()] = kv[2].replace(/^"(.*)"$/, '$1')
+  }
+  return out.filter((e) => e.path)
+}
+
+/** Commit a submodule checkout points at, read from its git dir; null if not checked out. */
+export function readSubmoduleHead(dir: string): string | null {
+  const dotGit = join(dir, '.git')
+  let gitDir: string
+  try {
+    const st = statSync(dotGit)
+    if (st.isDirectory()) gitDir = dotGit
+    else {
+      const m = readFileSync(dotGit, 'utf8').match(/^gitdir:\s*(.+?)\s*$/m)
+      if (!m) return null
+      gitDir = isAbsolute(m[1]) ? m[1] : resolve(dir, m[1])
+    }
+    const head = readFileSync(join(gitDir, 'HEAD'), 'utf8').trim()
+    const ref = head.match(/^ref:\s*(.+)$/)
+    if (!ref) return /^[0-9a-f]{40,64}$/.test(head) ? head : null
+    const loose = join(gitDir, ref[1])
+    if (existsSync(loose)) return readFileSync(loose, 'utf8').trim()
+    const packed = join(gitDir, 'packed-refs')
+    if (existsSync(packed)) {
+      const line = readFileSync(packed, 'utf8').split('\n').find((l) => l.endsWith(' ' + ref[1]))
+      if (line) return line.split(' ')[0]
+    }
+    return null
+  } catch {
+    return null
   }
 }

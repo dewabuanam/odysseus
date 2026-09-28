@@ -14,6 +14,11 @@ import type {
   RepoSummary,
   Settings,
   Stash,
+  Submodule,
+  FetchOptions,
+  MergeOptions,
+  PullOptions,
+  StashOptions,
   Tag,
   WorkingStatus
 } from '@shared/types'
@@ -73,8 +78,8 @@ export const api = {
   checkoutRemote: (ref: string) => call<CommandResult>('checkoutRemote', ref),
   createBranch: (n: string, start?: string, checkout?: boolean) => call<CommandResult>('createBranch', n, start, checkout),
   deleteBranch: (n: string, force?: boolean) => call<CommandResult>('deleteBranch', n, force),
-  merge: (ref: string, noVerify?: boolean) => call<CommandResult>('merge', ref, noVerify),
-  rebase: (onto: string) => call<CommandResult>('rebase', onto),
+  merge: (ref: string, opts?: MergeOptions) => call<CommandResult>('merge', ref, opts),
+  rebase: (onto: string, autostash?: boolean) => call<CommandResult>('rebase', onto, autostash),
   abortOperation: (op: string) => call<CommandResult>('abortOperation', op),
   continueOperation: (op: string) => call<CommandResult>('continueOperation', op),
   cherryPick: (sha: string) => call<CommandResult>('cherryPick', sha),
@@ -82,10 +87,10 @@ export const api = {
   reset: (sha: string, mode: 'soft' | 'mixed' | 'hard') => call<CommandResult>('reset', sha, mode),
   createTag: (n: string, sha: string, m?: string) => call<CommandResult>('createTag', n, sha, m),
   deleteTag: (n: string) => call<CommandResult>('deleteTag', n),
-  fetch: () => call<CommandResult>('fetch'),
-  pull: (rebase?: boolean) => call<CommandResult>('pull', rebase),
+  fetch: (o?: FetchOptions) => call<CommandResult>('fetch', o),
+  pull: (o?: PullOptions) => call<CommandResult>('pull', o),
   push: (o: PushOptions) => call<CommandResult>('push', o),
-  stash: (m?: string) => call<CommandResult>('stash', m),
+  stash: (o?: StashOptions | string) => call<CommandResult>('stash', o),
   stashApply: (ref: string, pop: boolean) => call<CommandResult>('stashApply', ref, pop),
   stashDrop: (ref: string) => call<CommandResult>('stashDrop', ref),
 
@@ -95,5 +100,13 @@ export const api = {
   setHookEnabled: (n: HookName, e: boolean) => call<void>('setHookEnabled', n, e),
   removeHook: (n: HookName) => call<void>('removeHook', n),
   makeHookExecutable: (n: HookName) => call<void>('makeHookExecutable', n),
-  runHook: (n: HookName, msg?: string) => call<CommandResult>('runHook', n, msg)
+  runHook: (n: HookName, msg?: string) => call<CommandResult>('runHook', n, msg),
+
+  submodules: () => call<Submodule[]>('submodules'),
+  superproject: () => call<string | null>('superproject'),
+  submoduleUpdate: (paths?: string[], o?: { init?: boolean; remote?: boolean }) => call<CommandResult>('submoduleUpdate', paths, o),
+  submoduleSync: () => call<CommandResult>('submoduleSync'),
+  submoduleAdd: (url: string, path: string, branch?: string) => call<CommandResult>('submoduleAdd', url, path, branch),
+  submoduleDeinit: (path: string) => call<CommandResult>('submoduleDeinit', path),
+  submodulePath: (path: string) => call<string>('submodulePath', path)
 }

@@ -6,6 +6,45 @@ export interface FileChange {
   path: string
   oldPath?: string
   status: FileStatusCode
+  /** Entry is a submodule; submoduleState describes what changed inside it */
+  submodule?: boolean
+  submoduleState?: string
+}
+
+export interface Submodule {
+  name: string
+  path: string
+  url: string
+  branch?: string
+  /** Commit the submodule is checked out at (or recorded at, if uninitialized) */
+  sha: string
+  /** ok: matches recorded commit; modified: checked out at a different commit */
+  state: 'ok' | 'modified' | 'uninitialized' | 'conflict'
+  describe?: string
+}
+
+export interface PullOptions {
+  mode?: 'merge' | 'rebase' | 'ff-only'
+  recurseSubmodules?: boolean
+}
+
+export interface FetchOptions {
+  remote?: string
+  tags?: boolean
+  recurseSubmodules?: boolean
+}
+
+export interface MergeOptions {
+  noFf?: boolean
+  ffOnly?: boolean
+  squash?: boolean
+  noVerify?: boolean
+}
+
+export interface StashOptions {
+  message?: string
+  includeUntracked?: boolean
+  keepIndex?: boolean
 }
 
 export interface WorkingStatus {
@@ -215,6 +254,7 @@ export interface PushOptions {
   setUpstream?: boolean
   force?: boolean
   noVerify?: boolean
+  tags?: boolean
 }
 
 export interface Settings {

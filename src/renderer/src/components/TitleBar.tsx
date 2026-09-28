@@ -8,13 +8,16 @@ import logo from '../assets/logo.png'
 interface Props {
   repo: RepoSummary | null
   status: WorkingStatus | null
+  /** Superproject path when the open repo is a submodule */
+  parent: string | null
+  onParent(): void
   onPalette(): void
   onRepoMenu(): void
   onBranchMenu(): void
 }
 
 /** Frameless window chrome: drag region, repo/branch switchers, palette trigger, window controls. */
-export function TitleBar({ repo, status, onPalette, onRepoMenu, onBranchMenu }: Props) {
+export function TitleBar({ repo, status, parent, onParent, onPalette, onRepoMenu, onBranchMenu }: Props) {
   const [platform, setPlatform] = useState<string>('win32')
   const [maximized, setMaximized] = useState(false)
   const activeRun = useActiveRun()
@@ -34,6 +37,14 @@ export function TitleBar({ repo, status, onPalette, onRepoMenu, onBranchMenu }: 
       {!mac && <img src={logo} className="tb-logo" alt="" />}
       {repo && (
         <>
+          {parent && (
+            <>
+              <button className="tb-btn tb-parent" onClick={onParent} title={`Back to parent repository ${parent}`}>
+                {parent.split(/[\\/]/).pop()}
+              </button>
+              <span className="tb-slash">›</span>
+            </>
+          )}
           <button className="tb-btn tb-repo" onClick={onRepoMenu} title={repo.path}>
             {repo.name}
           </button>

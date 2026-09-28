@@ -32,6 +32,10 @@ const runner = new GitRunner({
       GIT_COMMITTER_NAME: 'Test',
       GIT_COMMITTER_EMAIL: 't@example.com',
       GIT_CONFIG_NOSYSTEM: '1',
+      // Allow local-path submodule clones in tests (blocked by default since git 2.38.1).
+      GIT_CONFIG_COUNT: '1',
+      GIT_CONFIG_KEY_0: 'protocol.file.allow',
+      GIT_CONFIG_VALUE_0: 'always',
       ...extra
     }),
   events: {
@@ -315,6 +319,70 @@ async function main() {
     assert.equal((await repo.stashes()).length, 1)
     await repo.stashApply('stash@{0}', true)
     assert.equal(readFileSync(join(dir, 'new.txt'), 'utf8'), 'brand new\n')
+  })
+
+  await test('submodules: add, detect state, update, deinit, superproject', async () => {
+    const lib = mkdtempSync(join(tmpdir(), 'odysseus-lib-'))
+    sh(lib, 'init', '-q', '-b', 'main')
+    writeFileSync(join(lib, 'lib.txt'), 'v1\n')
+    sh(lib, 'add', '.')
+    sh(lib, 'commit', '-qm', 'lib v1')
+
+    let r = await repo.submoduleAdd(lib, 'vendor/lib')
+    assert.ok(r.ok, r.stderr)
+    let subs = await repo.submodules()
+    assert.equal(subs.length, 1)
+    assert.equal(subs[0].path, 'vendor/lib')
+    assert.equal(subs[0].state, 'ok')
+    let s = await repo.status()
+    assert.ok(s.staged.some((f) => f.path === 'vendor/lib' && f.submodule), 'staged submodule flagged')
+    r = await repo.commit({ message: 'add lib submodule' })
+    assert.ok(r.ok, r.stderr)
+
+    // new commit inside the submodule -> parent sees it as modified
+    const subDir = join(dir, 'vendor', 'lib')
+    writeFileSync(join(subDir, 'lib.txt'), 'v2\n')
+    sh(subDir, 'commit', '-qam', 'lib v2')
+    s = await repo.status()
+    const entry = s.unstaged.find((f) => f.path === 'vendor/lib')
+    assert.ok(entry?.submodule)
+    assert.match(entry!.submoduleState ?? '', /new commits/)
+    subs = await repo.submodules()
+    assert.equal(subs[0].state, 'modified')
+
+    // update resets it to the recorded commit
+    r = await repo.submoduleUpdate(['vendor/lib'])
+    assert.ok(r.ok, r.stderr)
+    assert.equal((await repo.submodules())[0].state, 'ok')
+
+    // superproject detection from inside the submodule
+    const inner = new GitRepo(subDir, runner)
+    const parent = await inner.superproject()
+    assert.equal(parent?.replace(/\\/g, '/').toLowerCase(), (await GitRepo.resolveRoot(runner, dir)).replace(/\\/g, '/').toLowerCase())
+
+    r = await repo.submoduleDeinit('vendor/lib')
+    assert.ok(r.ok, r.stderr)
+    assert.equal((await repo.submodules())[0].state, 'uninitialized')
+    r = await repo.submoduleUpdate([], { init: true })
+    assert.ok(r.ok, r.stderr)
+    assert.equal((await repo.submodules())[0].state, 'ok')
+    rmSync(lib, { recursive: true, force: true })
+  })
+
+  await test('command options: pull modes, merge flags, stash keep-index', async () => {
+    const r = await repo.merge('feature/x', { ffOnly: true })
+    assert.ok(r.ok, r.stderr) // already merged -> "Already up to date."
+    writeFileSync(join(dir, 'a.txt'), 'staged change\n')
+    await repo.stage(['a.txt'])
+    writeFileSync(join(dir, 'b.txt'), 'unstaged change\n')
+    const st = await repo.stash({ message: 'keep', keepIndex: true, includeUntracked: false })
+    assert.ok(st.ok, st.stderr)
+    const s = await repo.status()
+    assert.ok(s.staged.some((f) => f.path === 'a.txt'), 'index kept')
+    assert.ok(!s.unstaged.some((f) => f.path === 'b.txt'), 'worktree change stashed')
+    await repo.unstageAll()
+    sh(dir, 'checkout', '--', 'a.txt')
+    await repo.stashApply('stash@{0}', true)
   })
 
   rmSync(dir, { recursive: true, force: true })

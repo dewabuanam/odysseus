@@ -10,12 +10,29 @@ export interface Cmd {
   keys?: string
   /** Hidden from the palette and shortcuts when false. */
   when?: boolean
+  /** The git command this option runs, shown on the right. */
+  cmdline?: string
   run(): void | Step | Promise<void | Step>
 }
 
+export interface Suggestion {
+  value: string
+  detail?: string
+}
+
 export type Step =
-  | { kind: 'list'; placeholder: string; items: Cmd[] }
-  | { kind: 'input'; placeholder: string; value?: string; submit(value: string): void | Step | Promise<void | Step> }
+  | { kind: 'list'; placeholder: string; items: Cmd[]; title?: string }
+  | {
+      kind: 'input'
+      placeholder: string
+      /** Pre-filled value */
+      value?: string
+      title?: string
+      /** Options shown under the input; arrow keys fill them in */
+      suggestions?: Suggestion[]
+      allowEmpty?: boolean
+      submit(value: string): void | Step | Promise<void | Step>
+    }
 
 const isMac = navigator.userAgent.includes('Mac')
 
@@ -127,20 +144,26 @@ function pushRecent(id: string) {
 
 const MAX_RENDERED = 150
 
+const crumbOf = (s: string) => s.replace(/…$/, '').replace(/^[^:]+:\s*/, '')
+
 export function Palette({ initial, onClose }: { initial: Step; onClose(): void }) {
-  const [stack, setStack] = useState<Step[]>([initial])
+  const [stack, setStack] = useState<{ step: Step; crumb?: string }[]>([{ step: initial, crumb: initial.title }])
+  // `query` is what the input shows; `typed` is what the user actually typed. Arrow keys fill
+  // the input with a suggestion without changing which suggestions are listed.
   const [query, setQuery] = useState(initial.kind === 'input' ? initial.value ?? '' : '')
-  const [active, setActive] = useState(0)
+  const [typed, setTyped] = useState('')
+  const [active, setActive] = useState(initial.kind === 'input' ? -1 : 0)
   const [busy, setBusy] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
-  const step = stack[stack.length - 1]
+  const { step } = stack[stack.length - 1]
   const isRoot = stack.length === 1
+  const crumbs = stack.map((s) => s.crumb).filter(Boolean) as string[]
 
   const results = useMemo(() => {
     if (step.kind !== 'list') return []
     const items = step.items.filter((c) => c.when !== false)
-    if (!query.trim()) {
+    if (!typed.trim()) {
       if (!isRoot) return items.map((c) => ({ c, hits: [] as number[] }))
       const recent = loadRecent()
       const rank = (c: Cmd) => {
@@ -151,31 +174,47 @@ export function Palette({ initial, onClose }: { initial: Step; onClose(): void }
     }
     const scored: { c: Cmd; hits: number[]; score: number }[] = []
     for (const c of items) {
-      const m = fuzzy(query, c.title)
+      const m = fuzzy(typed, c.title)
       if (m) scored.push({ c, hits: m.hits, score: m.score })
-      else if (c.detail) {
-        const d = fuzzy(query, c.detail)
+      else {
+        const d = fuzzy(typed, `${c.detail ?? ''} ${c.cmdline ?? ''}`)
         if (d) scored.push({ c, hits: [], score: d.score - 5 })
       }
     }
     return scored.sort((a, b) => b.score - a.score)
-  }, [step, query, isRoot])
+  }, [step, typed, isRoot])
 
-  useEffect(() => setActive(0), [query, step])
+  const suggestions = useMemo(() => {
+    if (step.kind !== 'input' || !step.suggestions) return []
+    if (!typed.trim()) return step.suggestions
+    return step.suggestions
+      .map((s) => ({ s, m: fuzzy(typed, s.value) }))
+      .filter((x) => x.m)
+      .sort((a, b) => b.m!.score - a.m!.score)
+      .map((x) => x.s)
+  }, [step, typed])
+
+  const count = step.kind === 'list' ? Math.min(results.length, MAX_RENDERED) : suggestions.length
+
   useEffect(() => inputRef.current?.focus(), [step])
-
   useLayoutEffect(() => {
     const el = listRef.current?.children[active] as HTMLElement | undefined
     el?.scrollIntoView({ block: 'nearest' })
   }, [active])
 
-  const advance = async (next: void | Step | Promise<void | Step>) => {
+  const reset = (s: Step) => {
+    setQuery(s.kind === 'input' ? s.value ?? '' : '')
+    setTyped('')
+    setActive(s.kind === 'input' ? -1 : 0)
+  }
+
+  const advance = async (next: void | Step | Promise<void | Step>, crumb?: string) => {
     setBusy(true)
     try {
       const r = await next
       if (r) {
-        setStack((s) => [...s, r])
-        setQuery(r.kind === 'input' ? r.value ?? '' : '')
+        setStack((s) => [...s, { step: r, crumb: r.title ?? crumb }])
+        reset(r)
       } else onClose()
     } catch (e) {
       console.error(e)
@@ -187,56 +226,95 @@ export function Palette({ initial, onClose }: { initial: Step; onClose(): void }
 
   const choose = (c: Cmd) => {
     if (isRoot) pushRecent(c.id)
-    advance(c.run())
+    advance(c.run(), crumbOf(c.title))
+  }
+
+  const back = () => {
+    const prev = stack[stack.length - 2]
+    setStack((s) => s.slice(0, -1))
+    reset(prev.step)
+  }
+
+  const fill = (v: string) => {
+    setQuery(v)
+    setTyped(v)
+    inputRef.current?.focus()
   }
 
   const onKey = (e: React.KeyboardEvent) => {
     e.stopPropagation()
+    const move = (delta: number) => {
+      e.preventDefault()
+      if (!count) return
+      const floor = step.kind === 'input' ? -1 : 0
+      const next = Math.max(floor, Math.min(count - 1, active + delta))
+      setActive(next)
+      // Input steps: moving onto a suggestion fills the input with it.
+      if (step.kind === 'input') setQuery(next === -1 ? typed || (step.value ?? '') : suggestions[next].value)
+    }
     if (e.key === 'Escape') {
       e.preventDefault()
       onClose()
     } else if (e.key === 'Backspace' && !query && stack.length > 1) {
       e.preventDefault()
-      setStack((s) => s.slice(0, -1))
-    } else if (step.kind === 'list' && (e.key === 'ArrowDown' || (e.ctrlKey && e.key === 'n'))) {
+      back()
+    } else if (e.key === 'ArrowDown' || (e.ctrlKey && e.key === 'n')) move(1)
+    else if (e.key === 'ArrowUp' || (e.ctrlKey && e.key === 'p')) move(-1)
+    else if (e.key === 'PageDown') move(10)
+    else if (e.key === 'PageUp') move(-10)
+    else if (e.key === 'Tab') {
+      // Tab completes the input with the highlighted option (or the first one).
       e.preventDefault()
-      setActive((a) => Math.min(a + 1, Math.min(results.length, MAX_RENDERED) - 1))
-    } else if (step.kind === 'list' && (e.key === 'ArrowUp' || (e.ctrlKey && e.key === 'p'))) {
-      e.preventDefault()
-      setActive((a) => Math.max(a - 1, 0))
-    } else if (step.kind === 'list' && e.key === 'PageDown') {
-      e.preventDefault()
-      setActive((a) => Math.min(a + 10, Math.min(results.length, MAX_RENDERED) - 1))
-    } else if (step.kind === 'list' && e.key === 'PageUp') {
-      e.preventDefault()
-      setActive((a) => Math.max(a - 10, 0))
+      if (step.kind === 'list') {
+        const r = results[Math.max(active, 0)]
+        if (r) fill(r.c.title)
+      } else {
+        const s = suggestions[Math.max(active, 0)]
+        if (s) {
+          fill(s.value)
+          setActive(-1)
+        }
+      }
     } else if (e.key === 'Enter') {
       e.preventDefault()
       if (busy) return
       if (step.kind === 'list') {
         const r = results[active]
         if (r) choose(r.c)
-      } else if (query.trim()) {
-        advance(step.submit(query.trim()))
+      } else if (query.trim() || step.allowEmpty) {
+        advance(step.submit(query.trim()), crumbOf(query.trim()))
       }
     }
   }
+
+  const hint =
+    step.kind === 'list'
+      ? 'Up/Down choose · Tab fill · Enter select'
+      : `${suggestions.length ? 'Up/Down fill · Tab complete · ' : ''}Enter confirm`
 
   return (
     <div className="palette-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="palette" onKeyDown={onKey}>
         <div className="palette-input">
-          {stack.length > 1 && <span className="palette-crumb">{stack.length - 1}</span>}
+          {crumbs.map((c, i) => (
+            <span key={i} className="palette-crumb" title="Backspace to go back">
+              {c}
+            </span>
+          ))}
           <input
             ref={inputRef}
             value={query}
             placeholder={step.placeholder}
             spellCheck={false}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => {
+              setQuery(e.target.value)
+              setTyped(e.target.value)
+              setActive(step.kind === 'input' ? -1 : 0)
+            }}
           />
           {busy && <span className="spinner" />}
         </div>
-        {step.kind === 'list' ? (
+        {step.kind === 'list' && (
           <div className="palette-list" ref={listRef}>
             {results.slice(0, MAX_RENDERED).map(({ c, hits }, i) => (
               <div
@@ -249,14 +327,35 @@ export function Palette({ initial, onClose }: { initial: Step; onClose(): void }
                   <Highlight text={c.title} hits={hits} />
                   {c.detail && <span className="palette-detail">{c.detail}</span>}
                 </span>
+                {c.cmdline && <code className="palette-cmd">{c.cmdline}</code>}
                 {c.keys && <kbd>{formatKeys(c.keys)}</kbd>}
               </div>
             ))}
             {results.length === 0 && <div className="palette-empty">No matches</div>}
           </div>
-        ) : (
-          <div className="palette-hint">Enter to confirm{stack.length > 1 ? ', Backspace to go back' : ''}, Esc to cancel</div>
         )}
+        {step.kind === 'input' && suggestions.length > 0 && (
+          <div className="palette-list" ref={listRef}>
+            {suggestions.map((s, i) => (
+              <div
+                key={s.value + i}
+                className={`palette-item ${i === active ? 'active' : ''}`}
+                onMouseMove={() => i !== active && setActive(i)}
+                onClick={() => {
+                  fill(s.value)
+                  setActive(-1)
+                }}
+              >
+                <span className="grow ellipsis mono">{s.value}</span>
+                {s.detail && <span className="palette-detail">{s.detail}</span>}
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="palette-hint">
+          {hint}
+          {stack.length > 1 ? ' · Backspace back' : ''} · Esc close
+        </div>
       </div>
     </div>
   )

@@ -50,8 +50,16 @@ export function parseStatus(out: string): Omit<WorkingStatus, 'operation'> {
       const oldPath = renamed ? tokens[++i] : undefined
       const x = xy[0]
       const y = xy[1]
-      if (x !== '.') status.staged.push({ path, oldPath, status: normalize(x) })
-      if (y !== '.') status.unstaged.push({ path, status: normalize(y) })
+      // <sub> field: "N..." for files, "S<c><m><u>" for submodules
+      // (c: commit changed, m: tracked changes inside, u: untracked files inside).
+      const sub = parts[2]
+      const isSub = sub?.startsWith('S')
+      const subState = isSub
+        ? [sub[1] === 'C' && 'new commits', sub[2] === 'M' && 'modified content', sub[3] === 'U' && 'untracked content'].filter(Boolean).join(', ')
+        : undefined
+      const extra = isSub ? { submodule: true, submoduleState: subState } : {}
+      if (x !== '.') status.staged.push({ path, oldPath, status: normalize(x), ...extra })
+      if (y !== '.') status.unstaged.push({ path, status: normalize(y), ...extra })
     } else if (t.startsWith('u ')) {
       const parts = t.split(' ')
       status.conflicted.push({ path: parts.slice(10).join(' '), status: 'U' })

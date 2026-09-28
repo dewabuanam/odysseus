@@ -4,16 +4,17 @@ A fast, keyboard-driven desktop Git client with Git hooks treated as a first-cla
 
 ## Keyboard first
 
-Press **Ctrl+P** (Cmd+P on macOS) to open the command palette. Every action lives there, with fuzzy matching (`chk` finds *Branch: Checkout*, `nb` finds *New Branch*). Multi-step commands chain inside the palette: *Checkout* then pick a branch, *New Branch* then type a name. Backspace on an empty query steps back. Recently used commands float to the top.
+Press **Ctrl+P** (Cmd+P on macOS) to open the command palette. Every action lives there, with fuzzy matching (`chk` finds *Branch: Checkout*, `nb` finds *New Branch*). Choosing a command shows its options before anything runs, each with the exact git command next to it: *Push* offers push / set upstream / force-with-lease / no-verify / tags, *Pull* offers merge / rebase / fast-forward only, *Merge* asks for a branch and then `--no-ff` / `--ff-only` / `--squash`. Inputs come pre-filled with suggestions: your draft commit message and conventional-commit prefixes, the next semantic version for tags, `feature/` and `fix/` prefixes for branches. Up/Down fills the input from the suggestions, Tab completes, Backspace on an empty input steps back, and the chosen command shows as a breadcrumb. Recently used commands float to the top.
 
 | Key | Action |
 |---|---|
 | Ctrl+P / Ctrl+Shift+P | Command palette |
-| Ctrl+Shift+C | Write commit message |
+| Ctrl+K | Commit (options, then message) |
+| Ctrl+Shift+C | Write commit message in the editor |
 | Ctrl+Enter | Commit staged changes |
 | Ctrl+Shift+A / Ctrl+Shift+U | Stage all / unstage all |
 | Ctrl+B / Ctrl+Shift+B | New branch / checkout branch |
-| Alt+F / Alt+L / Alt+P | Fetch / pull / push |
+| Alt+F / Alt+L / Alt+P | Fetch / pull / push (with options) |
 | Alt+S / Alt+Shift+S | Stash / pop stash |
 | Ctrl+G / Ctrl+Shift+G | Go to branch / go to commit |
 | Ctrl+0 | Working directory |
@@ -26,6 +27,10 @@ Press **Ctrl+P** (Cmd+P on macOS) to open the command palette. Every action live
 | Up / Down | Move through commits |
 
 The window uses a custom title bar: repository and branch switchers on the left (both open the palette), the command bar in the middle (it also shows the hook that is currently running), and window controls on the right.
+
+## Submodules
+
+A **Submodules** section in the sidebar shows each submodule's state: up to date, checked out at a different commit, not initialized, or conflicted. Double-click to open a submodule as its own repository (the title bar shows the parent so you can jump back), or initialize it if it isn't checked out. Changed submodules are flagged in the working directory with what changed inside them (new commits, modified or untracked content) and can be updated in place. The palette covers update (recorded or latest remote commit), add, sync URLs and deinit, and pull / fetch can recurse into submodules.
 
 ## Hooks done right
 
@@ -56,7 +61,7 @@ Everything runs through the real `git` CLI, so hooks behave exactly as they do i
 - Stage, unstage and discard files, **hunks, or individual lines** (click lines, shift-click for a range)
 - Commit, amend; merge, rebase, cherry-pick, revert, reset, abort/continue operations
 - Branches, remotes, tags, stashes; fetch / pull / push (with upstream setup and force-with-lease)
-- Paper & pencil theme: black and white, hand-drawn borders, pencil hatching for deletions, dash-patterned graph lanes; plus a chalkboard dark variant
+- Paper & pencil theme: black and white, hand-drawn borders, pencil hatching for deletions, colored-pencil graph lanes; plus a chalkboard dark variant
 - Portable mode
 
 ## Develop

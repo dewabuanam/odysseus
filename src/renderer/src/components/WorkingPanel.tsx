@@ -6,6 +6,7 @@ import { useRepo } from '../repoContext'
 import { runStore, useActiveRun } from '../runs'
 import { Ansi, fmtDuration, useTicker, useUi } from '../ui'
 import { DiffView } from './DiffView'
+import type { CommitAction } from '../commands'
 
 type Area = 'unstaged' | 'staged' | 'conflicted'
 
@@ -56,9 +57,9 @@ export function WorkingPanel() {
   useEffect(() => saveDraft(repo.root, message), [repo.root, message])
 
   const textRef = useRef<HTMLTextAreaElement>(null)
-  const actionRef = useRef<(a: string) => void>(() => {})
+  const actionRef = useRef<(a: CommitAction) => void>(() => {})
   useEffect(() => {
-    const on = (e: Event) => actionRef.current((e as CustomEvent<string>).detail)
+    const on = (e: Event) => actionRef.current((e as CustomEvent<CommitAction>).detail)
     window.addEventListener('ody:commit', on)
     return () => window.removeEventListener('ody:commit', on)
   }, [])
@@ -148,8 +149,10 @@ export function WorkingPanel() {
     }
   }
 
-  const doCommit = async (noVerify = skipHooks) => {
-    if (!message.trim()) {
+  const doCommit = async (noVerify = skipHooks, req?: { message: string; amend?: boolean; signoff?: boolean }) => {
+    const msg = req?.message ?? message
+    const isAmend = req?.amend ?? amend
+    if (!msg.trim()) {
       ui.toast('Enter a commit message', true)
       return
     }
@@ -157,8 +160,19 @@ export function WorkingPanel() {
     setCommitting(true)
     setFailure(null)
     setModifiedByHook([])
-    const result = await repo.exec(() => api.commit({ message, amend, noVerify }))
+    if (req) setMessage(req.message)
+    const result = await repo.exec(() => api.commit({ message: msg, amend: isAmend, noVerify, signoff: req?.signoff }))
     setCommitting(false)
+
+    if (result.ok) {
+      setMessage('')
+      setAmend(false)
+      preAmendMessage.current = null
+      ui.toast(isAmend ? 'Commit amended' : 'Committed')
+    } else if (!result.cancelled) {
+      const run = runStore.get()[0]
+      setFailure({ result, output: run?.output ?? result.stderr + result.stdout, hook: result.failedHook, amend: isAmend })
+    }
 
     // Detect files modified by hooks (formatters / lint --fix) after they were staged.
     const after = await api.status().catch(() => null)
@@ -167,15 +181,6 @@ export function WorkingPanel() {
       setModifiedByHook(touched)
     }
 
-    if (result.ok) {
-      setMessage('')
-      setAmend(false)
-      preAmendMessage.current = null
-      ui.toast(amend ? 'Commit amended' : 'Committed')
-    } else if (!result.cancelled) {
-      const run = runStore.get()[0]
-      setFailure({ result, output: run?.output ?? result.stderr + result.stdout, hook: result.failedHook, amend })
-    }
   }
 
   const commitAnyway = async () => {
@@ -193,8 +198,11 @@ export function WorkingPanel() {
     if (r) doCommit(true)
   }
 
-  actionRef.current = (a: string) => {
-    if (a === 'focus') textRef.current?.focus()
+  actionRef.current = (a: CommitAction) => {
+    if (typeof a === 'object') {
+      if (a.amend !== undefined) setAmend(a.amend)
+      doCommit(a.noVerify ?? false, a)
+    } else if (a === 'focus') textRef.current?.focus()
     else if (a === 'commit') doCommit()
     else if (a === 'commit-no-verify') commitAnyway()
     else if (a === 'amend') {
@@ -219,8 +227,23 @@ export function WorkingPanel() {
             <span className="grow ellipsis" title={f.path}>
               {f.oldPath ? <span className="dim">{f.oldPath} → </span> : null}
               {f.path}
+              {f.submodule && (
+                <span className="pill" style={{ marginLeft: 8 }} title="Submodule">
+                  submodule{f.submoduleState ? ': ' + f.submoduleState : ''}
+                </span>
+              )}
             </span>
             <span className="actions" onClick={(e) => e.stopPropagation()}>
+              {f.submodule && (
+                <>
+                  <button className="btn small" onClick={async () => repo.openRepo(await api.submodulePath(f.path))}>Open</button>
+                  {area === 'unstaged' && (
+                    <button className="btn small" title="Reset the submodule to the commit recorded in this repository" onClick={() => repo.exec(() => api.submoduleUpdate([f.path]), 'Submodule updated')}>
+                      Update
+                    </button>
+                  )}
+                </>
+              )}
               {area === 'unstaged' && (
                 <>
                   <button className="btn small" onClick={() => discard([f])}>Discard</button>
