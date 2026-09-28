@@ -12,13 +12,15 @@ interface Props {
   onSelect(path: string): void
   onClose(path: string): void
   onNew(): void
+  /** Move a tab to a new position in the tab order */
+  onMove(path: string, index: number): void
 }
 
 /**
  * Repository tabs on their own row. Only as many tabs as fit are shown; the rest live in the
  * ▾ menu to the left of +. The active tab is always visible.
  */
-export function TabBar({ tabs, active, onSelect, onClose, onNew }: Props) {
+export function TabBar({ tabs, active, onSelect, onClose, onNew, onMove }: Props) {
   const ui = useUi()
   const runs = useRuns()
   const ref = useRef<HTMLDivElement>(null)
@@ -33,10 +35,15 @@ export function TabBar({ tabs, active, onSelect, onClose, onNew }: Props) {
   }, [])
 
   const fit = Math.max(1, Math.floor((width - BUTTONS_W) / TAB_W))
-  let visible = tabs.slice(0, fit)
-  const activeTab = tabs.find((t) => t.path === active)
-  if (activeTab && !visible.includes(activeTab)) visible = [...visible.slice(0, fit - 1), activeTab]
-  const hidden = tabs.filter((t) => !visible.includes(t))
+  const visible = tabs.slice(0, fit)
+  const hidden = tabs.slice(fit)
+
+  // A hidden tab that becomes active (picked from the dropdown, Ctrl+Tab, Ctrl+1..9) moves into
+  // the last visible slot for good; the tab it displaces becomes the first one in the dropdown.
+  const activeIndex = tabs.findIndex((t) => t.path === active)
+  useEffect(() => {
+    if (active && activeIndex >= fit) onMove(active, fit - 1)
+  }, [active, activeIndex, fit, onMove])
   const busy = (path: string) => runs.some((r) => norm(r.root) === norm(path) && r.endedAt === undefined)
 
   return (

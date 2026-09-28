@@ -86,6 +86,17 @@ function Shell() {
     persist(cur, cur[n].path)
   }, [])
 
+  const moveTab = useCallback((path: string, index: number) => {
+    const { tabs: cur, active: act } = stateRef.current
+    const from = cur.findIndex((t) => t.path === path)
+    if (from === -1 || from === index) return
+    const next = [...cur]
+    const [tab] = next.splice(from, 1)
+    next.splice(Math.max(0, Math.min(index, next.length)), 0, tab)
+    setTabs(next)
+    persist(next, act)
+  }, [])
+
   const selectTab = useCallback((path: string) => {
     setActive(path)
     persist(stateRef.current.tabs, path)
@@ -313,6 +324,7 @@ function Shell() {
           onSelect={selectTab}
           onClose={closeTab}
           onNew={() => api.pickRepo().then((d) => { if (d) openRepo(d) })}
+          onMove={moveTab}
         />
       )}
       {!activeTab && <Welcome onOpen={openRepo} />}

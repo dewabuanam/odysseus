@@ -59,11 +59,19 @@ export function UiProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!menu) return
     const close = () => setMenu(null)
-    window.addEventListener('click', close)
-    window.addEventListener('blur', close)
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && close()
+    // Start listening only after the click that opened the menu has finished bubbling;
+    // otherwise a menu opened by a left click (like the tab dropdown) closes instantly.
+    const t = setTimeout(() => {
+      window.addEventListener('click', close)
+      window.addEventListener('blur', close)
+      window.addEventListener('keydown', onKey)
+    }, 0)
     return () => {
+      clearTimeout(t)
       window.removeEventListener('click', close)
       window.removeEventListener('blur', close)
+      window.removeEventListener('keydown', onKey)
     }
   }, [menu])
 
