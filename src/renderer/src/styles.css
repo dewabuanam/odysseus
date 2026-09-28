@@ -398,3 +398,39 @@ kbd {
 /* ---------- native controls follow the theme (chalkboard dropdowns were white-on-white) */
 select.input, input.input, .textarea { background-color: var(--paper); color: var(--ink); }
 select.input option, select option { background: var(--paper); color: var(--ink); }
+
+/* ---------- repository tab row (below the title bar) */
+.tabbar { display: flex; align-items: stretch; height: 32px; flex-shrink: 0; background: var(--paper-2); border-bottom: 1.5px solid var(--ink); padding-left: 6px; gap: 2px; overflow: hidden; }
+.tab {
+  display: flex; align-items: center; gap: 6px; padding: 0 6px 0 12px; flex-shrink: 0; cursor: pointer;
+  font-family: var(--hand); font-size: 16px; color: var(--ink-2); border: 1px solid transparent; border-bottom: 0;
+  border-radius: 8px 8px 0 0; margin-top: 4px; position: relative; top: 1.5px;
+}
+.tab:hover { background: var(--hover); }
+.tab.active { background: var(--paper); color: var(--ink); border-color: var(--ink); border-width: 1.5px; }
+.tab:not(.active)::after { content: ''; position: absolute; right: -1px; top: 7px; bottom: 7px; border-right: 1px dashed var(--line); }
+.tab:not(.active):has(+ .tab.active)::after { display: none; }
+.tab-close { border: 0; background: none; cursor: pointer; color: var(--ink-3); font-size: 15px; line-height: 1; padding: 0 3px; border-radius: 3px; visibility: hidden; }
+.tab:hover .tab-close, .tab.active .tab-close { visibility: visible; }
+.tab-close:hover { background: var(--sel); color: var(--ink); }
+.tab-more, .tab-new { border: 0; background: none; cursor: pointer; color: var(--ink-2); padding: 0 8px; margin-top: 4px; border-radius: 6px 6px 0 0; flex-shrink: 0; }
+.tab-more:hover, .tab-new:hover { background: var(--hover); color: var(--ink); }
+.tab-new { font-size: 18px; }
+.tab-more { font-size: 12px; display: flex; align-items: center; gap: 4px; }
+.tab-more-count { font-size: 11px; background: var(--ink); color: var(--paper); border-radius: 8px; padding: 0 5px; line-height: 15px; }
+.tabbar-fill { flex: 1; }
+.tb-repo { font-family: var(--hand); font-size: 17px; padding: 0 6px; }
+
+/* ---------- commit search */
+.searchbar { display: flex; align-items: center; gap: 8px; padding: 5px 10px; border-bottom: 1px solid var(--line); }
+.searchbar-field { flex: 1; min-width: 0; position: relative; }
+.searchbar-input { width: 100%; border: 0; border-bottom: 1px solid var(--line); background: transparent; outline: none; padding: 3px 2px; font-family: var(--mono); font-size: 12px; color: var(--ink); }
+.searchbar-input:focus { border-bottom-color: var(--ink); }
+.searchbar-input::placeholder { color: var(--ink-3); font-family: var(--sans); }
+.searchbar-menu {
+  position: absolute; top: calc(100% + 3px); left: 0; min-width: 300px; max-width: 520px; z-index: 40;
+  background: var(--paper); border: 1.5px solid var(--ink); border-radius: var(--sketch); box-shadow: 3px 4px 0 var(--ink); padding: 3px;
+}
+.searchbar-item { display: flex; align-items: center; gap: 8px; padding: 3px 8px; cursor: pointer; border-radius: 4px; white-space: nowrap; }
+.searchbar-item.active { background: var(--sel); }
+.searchbar-kind { font-family: var(--mono); font-size: 10px; width: 14px; height: 14px; line-height: 12px; text-align: center; border: 1px solid var(--ink-3); border-radius: 3px; color: var(--ink-2); flex-shrink: 0; }

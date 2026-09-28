@@ -1,27 +1,25 @@
 import { useEffect, useState } from 'react'
-import type { RepoSummary, WorkingStatus } from '@shared/types'
+import type { WorkingStatus } from '@shared/types'
 import { api } from '../api'
 import { formatKeys } from '../palette'
 import { isRunActive, norm, useRuns } from '../runs'
 import logo from '../assets/logo.png'
 
 interface Props {
-  tabs: RepoSummary[]
+  /** Name of the active repository */
+  repoName: string | null
   active: string | null
   status: WorkingStatus | null
   /** Superproject path when the active repo is a submodule */
   parent: string | null
   paletteKeys?: string
-  onSelectTab(path: string): void
-  onCloseTab(path: string): void
-  onNewTab(): void
   onParent(): void
   onPalette(): void
   onBranchMenu(): void
 }
 
 /** Frameless window chrome: repository tabs, branch switcher, palette trigger, window controls. */
-export function TitleBar({ tabs, active, status, parent, paletteKeys, onSelectTab, onCloseTab, onNewTab, onParent, onPalette, onBranchMenu }: Props) {
+export function TitleBar({ repoName, active, status, parent, paletteKeys, onParent, onPalette, onBranchMenu }: Props) {
   const [platform, setPlatform] = useState<string>('win32')
   const [maximized, setMaximized] = useState(false)
   const runs = useRuns()
@@ -38,45 +36,13 @@ export function TitleBar({ tabs, active, status, parent, paletteKeys, onSelectTa
 
   const mac = platform === 'darwin'
   const branch = status ? (status.detached ? 'detached HEAD' : status.branch ?? '') : ''
-  const busy = (path: string) => runs.some((r) => norm(r.root) === norm(path) && r.endedAt === undefined)
 
   return (
     <div className={`titlebar ${mac ? 'mac' : ''}`}>
       {!mac && <img src={logo} className="tb-logo" alt="" />}
-      <div className="tb-tabs">
-        {tabs.map((t) => (
-          <div
-            key={t.path}
-            className={`tb-tab ${t.path === active ? 'active' : ''}`}
-            title={t.path}
-            onMouseDown={(e) => {
-              if (e.button === 1) {
-                e.preventDefault()
-                onCloseTab(t.path)
-              }
-            }}
-            onClick={() => onSelectTab(t.path)}
-          >
-            {busy(t.path) && <span className="spinner tiny" />}
-            <span className="ellipsis">{t.name}</span>
-            <button
-              className="tb-tab-close"
-              aria-label={`Close ${t.name}`}
-              onClick={(e) => {
-                e.stopPropagation()
-                onCloseTab(t.path)
-              }}
-            >
-              ×
-            </button>
-          </div>
-        ))}
-        <button className="tb-btn tb-newtab" onClick={onNewTab} title="Open repository in a new tab">
-          +
-        </button>
-      </div>
       {active && (
         <>
+          <span className="tb-repo">{repoName}</span>
           {parent && (
             <button className="tb-btn tb-parent" onClick={onParent} title={`Parent repository ${parent}`}>
               ↑ {parent.split(/[\\/]/).pop()}

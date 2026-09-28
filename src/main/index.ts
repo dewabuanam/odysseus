@@ -20,6 +20,7 @@ import {
   setSettings,
   setTabs
 } from './store'
+import type { SearchQuery } from '@shared/search'
 import type {
   FetchOptions,
   FileDiff,
@@ -233,6 +234,7 @@ const repoApi: Record<string, RepoHandler> = {
   status: ({ repo }) => repo.status(),
   log: ({ repo }, limit?: number, knownKey?: string, opts?: LogOptions) => repo.log(limit, knownKey, opts),
   logRef: ({ repo }, ref: string) => repo.logRef(ref),
+  search: ({ repo }, q: SearchQuery, limit?: number) => repo.search(q, limit),
   commitDetail: ({ repo }, sha: string) => repo.commitDetail(sha),
   diff: ({ repo }, src: DiffSource, context?: number) => repo.diff(src, context),
   branches: ({ repo }) => repo.branches(),

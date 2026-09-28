@@ -11,6 +11,7 @@ import { GitRunner } from '../src/main/git/runner'
 import { GitRepo } from '../src/main/git/repo'
 import { HookService } from '../src/main/git/hooks'
 import { layoutGraph } from '../src/main/git/parsers'
+import { parseSearch } from '../src/shared/search'
 
 const settings: Settings = {
   extraPath: [],
@@ -543,6 +544,45 @@ async function main() {
     const only = await repo.log(3000, undefined, { only: 'conflict-d' })
     assert.ok(only.commits.some((c) => c.subject === 'd side'))
     assert.ok(!only.commits.some((c) => c.subject === 'three (edited)'))
+  })
+
+  await test('search: query language runs on git (author, words, hash, path, merges, branch)', async () => {
+    const all = (await repo.log(3000)).commits
+    const q = (s: string) => repo.search(parseSearch(s))
+    let r = await q('author:"t@x" three')
+    assert.ok(r.length >= 1 && r.every((c) => /three/i.test(c.subject)), 'author + word')
+    const target = all.find((c) => c.subject === 'main work')!
+    r = await q(target.sha.slice(0, 8))
+    assert.equal(r[0]?.sha, target.sha, 'hash prefix')
+    r = await q('path:c.txt')
+    assert.ok(r.some((c) => c.subject === 'feature work') && r.every((c) => c.subject !== 'main work'), 'path')
+    r = await q('min-parents:2')
+    assert.ok(r.length >= 1 && r.every((c) => c.parents.length >= 2), 'merges only')
+    r = await q('max-parents:1 branch:feature/x')
+    assert.ok(r.every((c) => c.parents.length <= 1) && r.some((c) => c.subject === 'feature work'), 'branch + no merges')
+    assert.deepEqual(parseSearch('author:"John Smith" branch:main fix login'), { text: ['fix', 'login'], paths: [], message: [], regex: [], author: 'John Smith', branch: 'main' })
+  })
+
+  await test('search: extended keys (ext, string, regex, merges, date, limit, author:me)', async () => {
+    const q = (s: string) => repo.search(parseSearch(s))
+    let r = await q('ext:txt')
+    assert.ok(r.length > 0 && r.every(Boolean))
+    r = await q('string:"feature"')
+    assert.ok(r.some((c) => c.subject === 'feature work'), 'pickaxe string')
+    r = await q('regex:"^(one|two)"')
+    assert.ok(r.length >= 1 && r.every((c) => /^(one|two)/.test(c.subject)), 'message regex')
+    r = await q('merges:only')
+    assert.ok(r.every((c) => c.parents.length >= 2))
+    r = await q('merges:none')
+    assert.ok(r.every((c) => c.parents.length <= 1))
+    r = await q('date:today')
+    assert.ok(r.length > 0, 'today')
+    r = await q('limit:2')
+    assert.equal(r.length, 2)
+    r = await q('author:me')
+    assert.ok(r.length > 0 && r.every((c) => c.email === 't@example.com'), 'author:me uses user.email')
+    r = await q('fix (a.b)')
+    assert.ok(Array.isArray(r), 'special characters in plain words are literal')
   })
 
   rmSync(dir, { recursive: true, force: true })

@@ -17,6 +17,7 @@ import { RepoView, type TabHandle, type TabInfo } from './RepoView'
 import { norm, runStore } from './runs'
 import { UiProvider, useUi } from './ui'
 import { SettingsDialog } from './components/SettingsDialog'
+import { TabBar } from './components/TabBar'
 import { TitleBar } from './components/TitleBar'
 import { Welcome } from './components/Welcome'
 
@@ -292,14 +293,11 @@ function Shell() {
   return (
     <div className="app">
       <TitleBar
-        tabs={tabs}
+        repoName={activeTab?.name ?? null}
         active={active}
         status={activeInfo?.status ?? null}
         parent={activeInfo?.superproject ?? null}
         paletteKeys={bindings['app.palette']?.[0]}
-        onSelectTab={selectTab}
-        onCloseTab={closeTab}
-        onNewTab={() => api.pickRepo().then((d) => { if (d) openRepo(d) })}
         onParent={() => activeInfo?.superproject && openRepo(activeInfo.superproject)}
         onPalette={() => openPalette()}
         onBranchMenu={() => {
@@ -308,6 +306,15 @@ function Shell() {
         }}
       />
 
+      {tabs.length > 0 && (
+        <TabBar
+          tabs={tabs}
+          active={active}
+          onSelect={selectTab}
+          onClose={closeTab}
+          onNew={() => api.pickRepo().then((d) => { if (d) openRepo(d) })}
+        />
+      )}
       {!activeTab && <Welcome onOpen={openRepo} />}
       {tabs.map((t) => (
         <RepoView

@@ -1,4 +1,5 @@
 import { createContext, useContext } from 'react'
+import type { SearchQuery } from '@shared/search'
 import type {
   Branch,
   CommandResult,
@@ -73,6 +74,7 @@ export function repoApi(root: string) {
     log: (limit?: number, knownKey?: string, opts?: LogOptions) =>
       r<{ key: string; unchanged?: boolean; commits: Commit[]; graph: GraphRow[] }>('log', limit, knownKey, opts),
     logRef: (ref: string) => r<Commit[]>('logRef', ref),
+    search: (q: SearchQuery, limit?: number) => r<Commit[]>('search', q, limit),
     commitDetail: (sha: string) => r<CommitDetail>('commitDetail', sha),
     diff: (src: DiffSource, context?: number) => r<FileDiff | null>('diff', src, context),
     branches: () => r<Branch[]>('branches'),

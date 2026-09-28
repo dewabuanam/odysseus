@@ -1,113 +1,153 @@
-# Odysseus
+<p align="center">
+  <img src="resources/icon.png" width="140" alt="Odysseus logo">
+</p>
 
-A fast, keyboard-driven desktop Git client with Git hooks treated as a first-class citizen.
+<h1 align="center">Odysseus</h1>
 
-## Keyboard first
+<p align="center">
+  A fast, keyboard-driven Git client for the desktop.<br>
+  Built around the one thing most Git GUIs get wrong: <b>Git hooks</b>.
+</p>
 
-Press **Ctrl+P** (Cmd+P on macOS) to open the command palette. Every action lives there, with fuzzy matching (`chk` finds *Branch: Checkout*, `nb` finds *New Branch*). Choosing a command shows its options before anything runs, each with the exact git command next to it: *Push* offers push / set upstream / force-with-lease / no-verify / tags, *Pull* offers merge / rebase / fast-forward only, *Merge* asks for a branch and then `--no-ff` / `--ff-only` / `--squash`. Inputs come pre-filled with suggestions: your draft commit message and conventional-commit prefixes, the next semantic version for tags, `feature/` and `fix/` prefixes for branches. Up/Down fills the input from the suggestions, Tab completes, Backspace on an empty input steps back, and the chosen command shows as a breadcrumb. The commands and options you pick most often rise to the top, per list: your usual push option or your most-used branch comes first.
+<p align="center">
+  <a href="https://github.com/dewabuanam/odysseus/releases/latest">Download</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#search">Search</a> ·
+  <a href="#keyboard">Keyboard</a> ·
+  <a href="#building-from-source">Build</a>
+</p>
 
-### Keymaps
+![Odysseus](docs/screenshots/overview.png)
 
-The shortcuts below are the default. **Settings > Keymap** (or *Preferences: Keymap* in the palette) switches to **VS Code**, **JetBrains** (IntelliJ, Rider, WebStorm: double-Shift for the palette, Ctrl+K commit, Ctrl+Shift+K push, Ctrl+T pull) or **Visual Studio + ReSharper** (Ctrl+T / Ctrl+Shift+A palette). *Preferences: Keyboard Shortcuts* (Ctrl+/) lists every binding of the active keymap.
+---
 
-| Key (default) | Action |
+## Why Odysseus
+
+Most Git GUIs treat hooks as an afterthought. A pre-commit hook that works in your terminal fails in the GUI with `command not found`, its output arrives as one unreadable blob after the fact, you can't tell which hook failed, and a hung hook freezes the app. Odysseus runs everything through the real `git` CLI, in your real shell environment, and shows you exactly what your hooks are doing while they do it.
+
+It is also built to stay out of your way: every action is a keystroke away through the command palette, many repositories stay open in tabs, and every git command waits its turn in a per-repository queue.
+
+## Download
+
+Grab the latest build from [Releases](https://github.com/dewabuanam/odysseus/releases/latest):
+
+| File | What it is |
 |---|---|
-| Ctrl+P / Ctrl+Shift+P | Command palette |
+| `Odysseus-<version>-portable.exe` | Windows, single file, **no install**. Keeps its settings in an `odysseus-data` folder next to the exe, so it runs from a USB stick. |
+| `Odysseus-<version>-win.zip` | Windows, unzip and run `Odysseus.exe`. Add an empty `odysseus-data` folder beside it for portable mode. |
+
+Requires **Git 2.36+** on your `PATH`. The builds aren't code-signed yet, so Windows SmartScreen asks for confirmation on first launch (*More info*, then *Run anyway*).
+
+## Features
+
+### Hooks, done right
+
+![A failing pre-commit hook](docs/screenshots/hooks.png)
+
+- **Live hook tracking.** Odysseus reads git's own `trace2` event stream, so it knows which hook is running, for how long, and how it exited: `pre-commit ✗ 1.2s · exit 1`.
+- **Streaming output** with colors, in a console per repository.
+- **Hooks find your tools.** Your login-shell environment is loaded (nvm, volta, asdf, pyenv, homebrew), Git for Windows' tools are on the path, extra PATH entries can be added in Settings, and the Hooks view warns about commands your hooks call that can't be found.
+- **Cancel or time out** a hook and the whole process tree is killed, including MSYS children on Windows.
+- **A failed commit keeps your message.** Retry, or commit with `--no-verify` after an explicit confirmation.
+- **Formatter changes are caught.** When a pre-commit hook rewrites staged files, Odysseus tells you and offers to stage the result.
+- **Hooks view.** Every hook in the repository, `core.hooksPath` support, husky / lefthook / pre-commit / overcommit / simple-git-hooks detection, edit, enable or disable, fix the executable bit, and **run a hook on its own** without committing.
+
+### Command palette with options
+
+![Push options in the palette](docs/screenshots/palette.png)
+
+Press **Ctrl+P**. Every action lives there, with fuzzy matching (`chk` finds *Checkout*). Choosing a command shows its options with the exact git command next to each, before anything runs: push with or without upstream, force-with-lease, no-verify, tags; pull by merge, rebase or fast-forward; merge with `--no-ff`, `--ff-only` or `--squash`. Inputs come pre-filled: your draft commit message with conventional-commit prefixes, the next semantic version for a tag, `feature/` and `fix/` for branch names. Arrow keys fill the input from the suggestions, Tab completes, Backspace steps back. The commands and options you use most rise to the top.
+
+### Tabs and a command queue
+
+- Open any number of repositories in **tabs** on their own row. Tabs that don't fit go into the **▾** menu next to **+**, and the active tab always stays visible. Tabs are restored on launch.
+- **Every git command is queued per repository** and runs strictly in order. Pull, checkout another branch, pull, checkout, pull: fire them as fast as you like and they run in exactly that sequence, never two at once. Queued commands show in the console with a button to drop them.
+- **Command history** of every command, its output, exit code and failing hook, kept across restarts (Ctrl+H).
+
+### Context menus
+
+![Commit context menu](docs/screenshots/menu.png)
+
+Right-click a commit or a branch for full context menus: checkout, delete, rename, copy, set or unset upstream, search a branch's history, hide branches, revert, cherry-pick, create a branch or tag, **edit the message of any commit**, amend, drop a commit, and reset (soft, mixed, hard).
+
+### Everything else
+
+- **Stage by file, hunk or line** with buttons. The UI updates instantly and git confirms right after.
+- **Conflicts**: merge, rebase and cherry-pick conflicts with the ours and theirs regions marked, *use ours* / *use theirs*, *mark resolved*, abort and continue.
+- **Submodules**, nested ones included: state at a glance, open in a tab, update, add, sync, deinit, and pull or fetch recursively.
+- **Stashes, tags, remotes**, fetch / pull / push with upstream setup.
+- **Recovery prompts**: when local changes block a command, stash them, retry, and restore them; when git has no author identity, set it in two keystrokes.
+- **Paper & pencil look** in black and white, with colored-pencil graph lanes, and a **chalkboard** dark theme.
+
+![Chalkboard theme](docs/screenshots/chalkboard.png)
+
+## Search
+
+![Search with autocomplete](docs/screenshots/search.png)
+
+**Ctrl+F** opens commit search. It runs on git itself, so it covers the whole history, not just what's loaded. Combine keys and bare words; keys autocomplete as you type, and so do their values (branches, authors, dates).
+
+```
+author:"Sam Lee" branch:"main" after:"2 weeks ago" path:src/cart.ts rounding
+```
+
+| Key | Finds commits… |
+|---|---|
+| *bare words* | whose message contains every word (a hex word also matches a commit hash) |
+| `author:` / `committer:` | by a name or email (`author:me` is you) |
+| `after:` / `before:` | committed after / before a date (`yesterday`, `1 week ago`, `2026-01-01`) |
+| `date:` | committed on one day |
+| `branch:` / `tag:` | reachable from a branch, tag or commit |
+| `path:` | touching a file or folder |
+| `ext:` | touching files with an extension (`ext:vue`) |
+| `message:` | whose message contains a phrase |
+| `regex:` | whose message matches a regular expression (`regex:"^(feat\|fix)"`) |
+| `hash:` | whose hash starts with |
+| `contents:` | whose diff adds or removes lines matching a regex |
+| `string:` | whose diff changes how often an exact string appears |
+| `merges:` | `only` merge commits, or `none` |
+| `max-parents:` / `min-parents:` | by number of parents (`max-parents:1` hides merges) |
+| `first-parent:` | on the mainline only |
+| `limit:` | at most N results (default 10000) |
+
+## Keyboard
+
+The default shortcuts are below. **Settings > Keymap** switches to **VS Code**, **JetBrains** (IntelliJ, Rider, WebStorm, with double-Shift for the palette) or **Visual Studio + ReSharper**. **Ctrl+/** lists every binding of the active keymap.
+
+| Key | Action |
+|---|---|
+| Ctrl+P | Command palette |
+| Ctrl+F | Search commits |
 | Ctrl+K | Commit (options, then message) |
-| Ctrl+Shift+C | Write commit message in the editor |
-| Ctrl+Enter / Ctrl+Shift+Enter | Commit staged changes / commit without hooks |
+| Ctrl+Shift+C | Write the commit message in the editor |
+| Ctrl+Enter / Ctrl+Shift+Enter | Commit / commit without hooks |
 | Ctrl+Shift+A / Ctrl+Shift+U | Stage all / unstage all |
 | Ctrl+B / Ctrl+Shift+B | New branch / checkout branch |
-| Alt+F / Alt+L / Alt+P | Fetch / pull / push (with options) |
+| Alt+F / Alt+L / Alt+P | Fetch / pull / push |
 | Alt+S / Alt+Shift+S | Stash / pop stash |
-| Ctrl+F | Find commits |
 | Ctrl+G / Ctrl+Shift+G | Go to branch / go to commit |
 | Ctrl+0 | Working directory |
-| Ctrl+H | Command history |
-| Ctrl+Shift+H | Hooks |
-| Ctrl+T / Ctrl+W | Open repository in a new tab / close tab |
+| Ctrl+H / Ctrl+Shift+H | Command history / hooks |
+| Ctrl+T / Ctrl+W | New tab / close tab |
 | Ctrl+Tab / Ctrl+Shift+Tab / Ctrl+1..9 | Next / previous / nth tab |
-| Ctrl+O / Ctrl+Shift+O | Open repository / open recent |
-| Ctrl+\` | Toggle console |
-| Ctrl+\\ | Toggle sidebar |
-| Ctrl+, / Ctrl+/ | Settings / keyboard shortcuts |
+| Ctrl+\` / Ctrl+\\ | Toggle console / sidebar |
+| Ctrl+, | Settings |
 | F5 | Refresh |
-| Up / Down | Move through commits |
 
-The window uses a custom title bar: repository **tabs** on the left, the branch switcher, the command bar in the middle (it shows the running command, the hook inside it, and how many commands are queued) and window controls on the right.
-
-## Tabs
-
-Open as many repositories as you like, each in its own tab with its own state, console and command queue. Tabs are restored on launch. Background tabs don't touch git until you switch to them. Opening a submodule opens it in a tab.
-
-## Command queue and history
-
-Every git command is queued per repository and runs strictly in order, never two at once. Pull, checkout another branch, pull, checkout, pull: fire them as fast as you like and they execute exactly in that sequence. Staging and other index writes wait their turn too, so git never trips over its own lock. The console lists the queue (with position numbers and a button to drop a waiting command), the running command, and the history: every command with its output, exit code and failing hook, kept across restarts. *View: Command History* (Ctrl+H) searches it.
-
-When a command is blocked by local changes, Odysseus offers to stash them, retry, and restore them. When git has no author identity yet, it asks for your name and email right there instead of failing.
-
-## Context menus
-
-Right-click a commit for the full menu: checkout / delete / rename / copy / set or unset upstream / search for the branches on that commit, delete or copy remote branches, checkout commit, revert, cherry-pick, copy the hash, **Create** (branch or tag here), **Edit** (edit the message of any commit, amend with staged changes, drop a commit) and **Reset to this commit** (soft, mixed, hard), plus hiding branches. Right-click a branch (sidebar or ref label) for checkout, delete, rename, copy, hide, hide all others, set / unset upstream, search (show only that branch's history), merge, rebase, new branch and push.
-
-## Conflicts
-
-Merge, rebase and cherry-pick conflicts are listed separately. Each conflicted file shows its conflict regions and resolves with *use ours* / *use theirs* (labelled for rebases, where the sides are swapped) or *mark resolved* after editing. Abort or continue the operation from the banner.
-
-## Submodules
-
-A **Submodules** section in the sidebar (always there, like Stashes, with an *Add submodule* entry when empty) shows each submodule's state: up to date, checked out at a different commit, not initialized, or conflicted, including nested submodules. Double-click to open a submodule as its own repository (the title bar shows the parent so you can jump back), or initialize it if it isn't checked out. Changed submodules are flagged in the working directory with what changed inside them (new commits, modified or untracked content) and can be updated in place. The palette covers update (recorded or latest remote commit), add, sync URLs and deinit, and pull / fetch can recurse into submodules.
-
-## Hooks done right
-
-Most GUI Git clients handle hooks poorly:
-
-| Problem | Odysseus |
-|---|---|
-| Hooks fail with `command not found` (node, npx, pnpm, python) because GUI apps don't get your shell's PATH | Loads your login-shell environment (nvm, volta, asdf, pyenv, homebrew), adds Git for Windows' POSIX tools, and lets you add extra PATH entries. The Hooks view warns about commands your hooks use that can't be found. |
-| You only see a blob of error text after the hook finishes | Output streams live, with ANSI colors, into the **Hook Console** |
-| No idea *which* hook failed or how long it ran | Each hook is tracked through git's own `trace2` event stream: name, duration and exit code for every hook in a run |
-| A hung hook freezes the commit | Cancel plus an optional per-hook timeout. The whole process tree is killed, including MSYS children on Windows. |
-| Failed commit means lost message | The message is kept (drafts persist too). A failure card shows the hook's output with **Retry** and an explicit, confirmed **Commit without hooks** |
-| Formatters in pre-commit silently leave changes unstaged | Detects files the hooks modified after staging and offers to stage them |
-| Hooks are invisible | **Hooks view**: every hook, `core.hooksPath` support, husky / lefthook / pre-commit / overcommit / simple-git-hooks detection, edit, enable/disable, fix the exec bit, and **Run now** (via `git hook run`) to test a hook without committing |
-
-Everything runs through the real `git` CLI, so hooks behave exactly as they do in your terminal.
-
-## Built for speed
-
-- File changes are classified: editing a file only re-runs `git status`; the log and graph reload only when refs move; hook edits only reload the hooks overview.
-- The commit graph is cached behind a cheap ref fingerprint, so unchanged history is never recomputed or re-sent to the UI.
-- Commit list is virtualized (thousands of commits scroll smoothly); huge diffs render a line budget with *Show all* on demand.
-- Hook output is coalesced before crossing IPC, so chatty hooks don't flood the renderer.
-- The window only shows once rendered, so there is no white flash at startup.
-
-## Also
-
-- Stage, unstage and discard files, **hunks, or individual lines** (click lines, shift-click for a range) with buttons; the UI updates instantly and git confirms right after
-- Commit, amend; merge, rebase, cherry-pick, revert, reset, abort/continue operations
-- Branches, remotes, tags, stashes; fetch / pull / push (with upstream setup and force-with-lease)
-- Paper & pencil theme: black and white, hand-drawn borders, pencil hatching for deletions, colored-pencil graph lanes; plus a chalkboard dark variant
-- Portable mode
-
-## Develop
+## Building from source
 
 ```bash
+git clone https://github.com/dewabuanam/odysseus.git
+cd odysseus
 npm install
-npm run dev        # run with hot reload
-npm run typecheck
-npm test           # end-to-end tests of the git/hook engine against real temp repos
+npm run dev             # run with hot reload
+npm test                # end-to-end tests of the git engine against real repositories
+npm run dist:portable   # Windows portable .exe into dist/
+npm run dist            # every target for the current OS
 ```
 
-## Build
+Odysseus is built with Electron, React and TypeScript. The git engine (`src/main/git`) drives the real `git` CLI; the test suite (`scripts/smoke-test.ts`) exercises it end to end: hooks, the queue, conflicts, history editing, submodules and search.
 
-```bash
-npm run dist:portable   # Windows: dist/Odysseus-<ver>-portable.exe, single file, no install
-npm run dist            # all targets for the current OS (Windows: portable + zip, macOS: zip + dmg, Linux: AppImage + tar.gz)
-```
+## License
 
-### Portable mode
-
-The portable `.exe` keeps all settings, recent repos and caches in an `odysseus-data` folder next to itself. Nothing is written to `%APPDATA%`, so it runs from a USB stick or a shared folder. With the `.zip` build, create an empty `odysseus-data` folder beside `Odysseus.exe` to enable the same behaviour.
-
-Requires Git 2.36 or newer on the machine (for `git hook run`; hook tracking needs trace2, available since 2.27).
+MIT

@@ -1,6 +1,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { isAbsolute, join, resolve } from 'node:path'
+import type { SearchQuery } from '@shared/search'
 import type {
   Branch,
   CommandResult,
@@ -428,6 +429,49 @@ export class GitRepo {
     const remote = remotes.find((r) => remoteRef.startsWith(r + '/')) ?? remoteRef.split('/')[0]
     const branch = remoteRef.slice(remote.length + 1)
     return this.run(`Delete ${remoteRef}`, ['push', remote, '--delete', branch])
+  }
+
+  /**
+   * Runs a structured search on git itself (not just the loaded commits), so it reaches the
+   * whole history. Bare words must all appear in the message; a hex word also matches a hash.
+   */
+  async search(q: SearchQuery, limit = 10000): Promise<Commit[]> {
+    limit = q.limit ?? limit
+    const head = readSubmoduleHead(this.root)
+    const revs = q.branch ? [q.branch] : ['--branches', '--remotes', '--tags', ...(head ? ['HEAD'] : [])]
+    const args = ['log', ...revs, '--topo-order', `--max-count=${limit}`, `--format=${LOG_FORMAT}`, '-i']
+    if (q.author) {
+      // author:me searches your own commits by configured email
+      const me = q.author.toLowerCase() === 'me' ? (await this.identity()).email : ''
+      args.push(`--author=${me || q.author}`)
+    }
+    if (q.firstParent) args.push('--first-parent')
+    if (q.string) args.push(`-S${q.string}`)
+    if (q.committer) args.push(`--committer=${q.committer}`)
+    if (q.after) args.push(`--after=${q.after}`)
+    if (q.before) args.push(`--before=${q.before}`)
+    if (q.maxParents !== undefined) args.push(`--max-parents=${q.maxParents}`)
+    if (q.minParents !== undefined) args.push(`--min-parents=${q.minParents}`)
+    if (q.contents) args.push(`-G${q.contents}`)
+    // Plain words are matched literally; regex: terms as extended regular expressions.
+    const escape = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const words = [...q.message, ...q.text].map(escape).concat(q.regex ?? [])
+    for (const w of words) args.push(`--grep=${w}`)
+    if (words.length) args.push('--extended-regexp')
+    if (words.length > 1) args.push('--all-match')
+    args.push('--', ...q.paths)
+
+    const byMessage = parseLog(await this.data(args).catch(() => ''))
+    // A lone hex word may be a commit hash rather than message text.
+    const hashes = q.text.filter((t) => /^[0-9a-f]{4,40}$/i.test(t))
+    if (!hashes.length) return byMessage
+    const found: Commit[] = []
+    for (const h of hashes) {
+      const out = await this.data(['log', '-1', `--format=${LOG_FORMAT}`, `${h}^{commit}`, '--']).catch(() => '')
+      found.push(...parseLog(out))
+    }
+    const seen = new Set(found.map((c) => c.sha))
+    return [...found, ...byMessage.filter((c) => !seen.has(c.sha))]
   }
 
   /** Commits reachable from one ref, for "Search…" on a branch. */

@@ -14,6 +14,8 @@ import type {
 } from '@shared/types'
 import { ApiContext, repoApi } from './api'
 import { buildCommands, identityFlow, list, type CommandDeps, type CommitAction } from './commands'
+import { isEmptyQuery, parseSearch } from '@shared/search'
+import { SearchBar } from './components/SearchBar'
 import { branchMenu, commitMenu, type MenuDeps } from './menus'
 import type { Cmd, Step } from './palette'
 import { RepoContext, type RepoCtx, type RefreshScope } from './repoContext'
@@ -71,6 +73,10 @@ export function RepoView({ tab, active, openRepo, closeTab, openPalette, openSet
   const [consoleOpen, setConsoleOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [listWidth, setListWidth] = useState(46)
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<Commit[] | null>(null)
+  const [searching, setSearching] = useState(false)
+  const searchSeq = useRef(0)
   const logKey = useRef<string | undefined>(undefined)
   const refreshing = useRef(false)
   const queued = useRef(new Set<RefreshScope>())
@@ -140,6 +146,37 @@ export function RepoView({ tab, active, openRepo, closeTab, openPalette, openSet
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active])
+
+  // Search runs on git (whole history), debounced; stale responses are dropped.
+  useEffect(() => {
+    const parsed = parseSearch(query)
+    if (isEmptyQuery(parsed)) {
+      setResults(null)
+      setSearching(false)
+      return
+    }
+    const seq = ++searchSeq.current
+    setSearching(true)
+    const t = setTimeout(() => {
+      api
+        .search(parsed)
+        .then((r) => seq === searchSeq.current && setResults(r))
+        .catch(() => seq === searchSeq.current && setResults([]))
+        .finally(() => seq === searchSeq.current && setSearching(false))
+    }, 220)
+    return () => clearTimeout(t)
+  }, [query, api, log.commits])
+
+  const people = useMemo(() => {
+    const seen = new Map<string, number>()
+    for (const c of log.commits.slice(0, 2000)) seen.set(c.author, (seen.get(c.author) ?? 0) + 1)
+    return [...seen.entries()].sort((a, b) => b[1] - a[1]).map(([n]) => n).slice(0, 40)
+  }, [log.commits])
+  const refNames = useMemo(() => [...branches.map((b) => b.name), ...tags.map((t) => t.name)], [branches, tags])
+  const pathNames = useMemo(
+    () => (status ? [...new Set([...status.unstaged, ...status.staged, ...status.conflicted].flatMap((f) => [f.path, f.path.split('/').slice(0, -1).join('/')]).filter(Boolean))] : []),
+    [status]
+  )
 
   // Re-query the graph when view options change.
   useEffect(() => {
@@ -396,13 +433,23 @@ export function RepoView({ tab, active, openRepo, closeTab, openPalette, openSet
                       <button className="btn small" onClick={() => setOnlyRef(null)}>Show all</button>
                     </div>
                   )}
+                  <SearchBar
+                    value={query}
+                    onChange={setQuery}
+                    inputRef={filterRef}
+                    refs={refNames}
+                    people={people}
+                    paths={pathNames}
+                    resultCount={results ? results.length : null}
+                    busy={searching}
+                  />
                   <CommitList
+                    results={results}
                     commits={log.commits}
                     graph={log.graph}
                     status={status}
                     selected={selected}
                     active={active}
-                    filterRef={filterRef}
                     onSelect={setSelected}
                     onContext={onCommitContext}
                     onRefContext={onRefContext}

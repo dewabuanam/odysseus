@@ -15,11 +15,14 @@ interface Props {
   selected: string | null
   /** Only the active tab handles arrow keys */
   active?: boolean
-  filterRef?: React.RefObject<HTMLInputElement | null>
+  /** Commits found by a search; replaces the graph while set */
+  results?: Commit[] | null
   onSelect(sha: string): void
   onContext(e: React.MouseEvent, c: Commit): void
   onRefContext?(e: React.MouseEvent, name: string): void
 }
+
+const EMPTY_ROW: GraphRow = { lane: 0, color: 0, top: [], bottom: [], width: 1 }
 
 const x = (lane: number) => 10 + Math.min(lane, MAX_LANES) * LANE_W
 
@@ -47,11 +50,10 @@ function GraphCell({ row, width, isHead }: { row: GraphRow; width: number; isHea
   )
 }
 
-export function CommitList({ commits, graph, status, selected, active = true, filterRef, onSelect, onContext, onRefContext }: Props) {
+export function CommitList({ commits, graph, status, selected, active = true, results = null, onSelect, onContext, onRefContext }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [scrollTop, setScrollTop] = useState(0)
   const [height, setHeight] = useState(600)
-  const [filter, setFilter] = useState('')
 
   useEffect(() => {
     const el = scrollRef.current
@@ -62,17 +64,13 @@ export function CommitList({ commits, graph, status, selected, active = true, fi
   }, [])
 
   const changes = status ? status.staged.length + status.unstaged.length + status.conflicted.length : 0
-  const showWip = changes > 0 || commits.length === 0
+  const filtered = results !== null
+  const showWip = !filtered && (changes > 0 || commits.length === 0)
 
-  const rows = useMemo(() => {
-    const f = filter.trim().toLowerCase()
-    const all = commits.map((c, i) => ({ c, g: graph[i] }))
-    if (!f) return all
-    return all.filter(
-      ({ c }) => c.subject.toLowerCase().includes(f) || c.author.toLowerCase().includes(f) || c.sha.startsWith(f)
-    )
-  }, [commits, graph, filter])
-  const filtered = filter.trim() !== ''
+  const rows = useMemo(
+    () => (results ? results.map((c) => ({ c, g: EMPTY_ROW })) : commits.map((c, i) => ({ c, g: graph[i] }))),
+    [commits, graph, results]
+  )
 
   const graphWidth = useMemo(() => {
     const maxW = graph.reduce((m, r) => Math.max(m, r.width), 1)
@@ -149,24 +147,7 @@ export function CommitList({ commits, graph, status, selected, active = true, fi
   function renderList() {
     return (
       <>
-        <div className="list-header">
-          <input
-            ref={filterRef}
-            className="input"
-            placeholder="Filter commits (message, author, sha)…"
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                setFilter('')
-                e.currentTarget.blur()
-              }
-            }}
-          />
-          <span className="faint" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
-            {rows.length} commits
-          </span>
-        </div>
+        {filtered && rows.length === 0 && <div className="empty">No commits match this search.</div>}
         <div className="commit-scroll" ref={scrollRef} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
           <div style={{ height: total * ROW_H, position: 'relative' }}>{items}</div>
         </div>
