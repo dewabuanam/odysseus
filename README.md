@@ -56,7 +56,8 @@ Everything runs through the real `git` CLI, so hooks behave exactly as they do i
 - Stage, unstage and discard files, **hunks, or individual lines** (click lines, shift-click for a range)
 - Commit, amend; merge, rebase, cherry-pick, revert, reset, abort/continue operations
 - Branches, remotes, tags, stashes; fetch / pull / push (with upstream setup and force-with-lease)
-- Dark and light themes; portable mode
+- Paper & pencil theme: black and white, hand-drawn borders, pencil hatching for deletions, dash-patterned graph lanes; plus a chalkboard dark variant
+- Portable mode
 
 ## Develop
 

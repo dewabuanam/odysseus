@@ -16,7 +16,7 @@ const DEFAULTS: StoreData = {
     forceColor: true,
     hookTimeoutSec: 0,
     gitPath: 'git',
-    theme: 'dark'
+    theme: 'light'
   },
   recentRepos: [],
   lastRepo: null

@@ -84,7 +84,7 @@ export function Sidebar({ selected, view, onSelectWorking, onShowHooks }: Props)
         {changes > 0 && <span className="count" style={{ color: 'var(--gold-2)' }}>{changes}</span>}
       </div>
       <div className={`sb-item ${view === 'hooks' ? 'active' : ''}`} style={{ paddingLeft: 12 }} onClick={onShowHooks}>
-        <span>⚓</span>
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"><circle cx="8" cy="3" r="1.8" /><path d="M8 4.8V14M4.5 7.5h7M2.5 10a5.5 5.5 0 0 0 11 0" /></svg>
         <span>Git Hooks</span>
         {hooks && (
           <span className="count">

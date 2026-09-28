@@ -225,7 +225,7 @@ function createWindow(): void {
     height: 900,
     minWidth: 900,
     minHeight: 560,
-    backgroundColor: '#0b0f17',
+    backgroundColor: '#f6f3ec',
     title: 'Odysseus',
     icon: existsSync(iconPath) ? nativeImage.createFromPath(iconPath) : undefined,
     show: false,

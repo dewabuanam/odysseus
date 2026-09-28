@@ -63,8 +63,8 @@ export function SettingsDialog({ onClose, onSaved }: { onClose(): void; onSaved(
         <div className="field" style={{ width: 140 }}>
           <span>Theme</span>
           <select className="input" value={s.theme} onChange={(e) => setS({ ...s, theme: e.target.value as Settings['theme'] })}>
-            <option value="dark">Dark</option>
-            <option value="light">Light</option>
+            <option value="light">Paper</option>
+            <option value="dark">Chalkboard</option>
           </select>
         </div>
       </div>

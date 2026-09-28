@@ -5,7 +5,17 @@ import { relTime } from '../ui'
 const ROW_H = 26
 const LANE_W = 14
 const MAX_LANES = 14
-export const GRAPH_COLORS = ['#d6aa55', '#5aa9ff', '#5fd38d', '#c678dd', '#ff8a65', '#56d4dd', '#f2c94c', '#ff6b9a']
+// Monochrome lanes: told apart by pencil pressure (shade) and dash pattern instead of color.
+const LANES = [
+  { c: 'var(--ink)', d: undefined },
+  { c: 'var(--ink-2)', d: '5 3' },
+  { c: 'var(--ink)', d: '1.5 3' },
+  { c: 'var(--ink-3)', d: undefined },
+  { c: 'var(--ink-2)', d: '8 3 2 3' },
+  { c: 'var(--ink)', d: '4 4' },
+  { c: 'var(--ink-3)', d: '6 2' },
+  { c: 'var(--ink-2)', d: undefined }
+]
 
 interface Props {
   commits: Commit[]
@@ -25,18 +35,18 @@ function GraphCell({ row, width, isHead }: { row: GraphRow; width: number; isHea
   return (
     <svg width={width} height={ROW_H} style={{ flexShrink: 0 }}>
       {row.top.map((e, i) => (
-        <path key={`t${i}`} d={path(x(e.fromLane), 0, x(e.toLane), mid)} stroke={GRAPH_COLORS[e.color]} strokeWidth={2} fill="none" />
+        <path key={`t${i}`} d={path(x(e.fromLane), 0, x(e.toLane), mid)} stroke={LANES[e.color].c} strokeDasharray={LANES[e.color].d} strokeWidth={1.6} strokeLinecap="round" fill="none" />
       ))}
       {row.bottom.map((e, i) => (
-        <path key={`b${i}`} d={path(x(e.fromLane), mid, x(e.toLane), ROW_H)} stroke={GRAPH_COLORS[e.color]} strokeWidth={2} fill="none" />
+        <path key={`b${i}`} d={path(x(e.fromLane), mid, x(e.toLane), ROW_H)} stroke={LANES[e.color].c} strokeDasharray={LANES[e.color].d} strokeWidth={1.6} strokeLinecap="round" fill="none" />
       ))}
       <circle
         cx={x(row.lane)}
         cy={mid}
-        r={isHead ? 5.5 : 4.5}
-        fill={isHead ? 'var(--bg)' : GRAPH_COLORS[row.color]}
-        stroke={GRAPH_COLORS[row.color]}
-        strokeWidth={isHead ? 2.5 : 1.5}
+        r={isHead ? 5 : 4}
+        fill={isHead ? 'var(--ink)' : 'var(--paper)'}
+        stroke="var(--ink)"
+        strokeWidth={1.6}
       />
     </svg>
   )
@@ -113,7 +123,7 @@ export function CommitList({ commits, graph, status, selected, onSelect, onConte
             {commits.length > 0 && !filtered && (
               <path d={`M${x(graph[0]?.lane ?? 0)} ${ROW_H / 2}L${x(graph[0]?.lane ?? 0)} ${ROW_H}`} stroke="var(--text-faint)" strokeWidth={2} strokeDasharray="3 3" />
             )}
-            <circle cx={x(graph[0]?.lane ?? 0)} cy={ROW_H / 2} r={4.5} fill="none" stroke="var(--gold)" strokeWidth={2} strokeDasharray="2 2" />
+            <circle cx={x(graph[0]?.lane ?? 0)} cy={ROW_H / 2} r={4.5} fill="none" stroke="var(--ink)" strokeWidth={1.6} strokeDasharray="2 2" />
           </svg>
           <span className="subject">
             {changes > 0 ? `Uncommitted changes (${changes})` : 'Working directory (no commits yet)'}

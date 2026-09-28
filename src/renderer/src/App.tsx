@@ -60,7 +60,7 @@ function Shell() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [palette, setPalette] = useState<Step | null>(null)
   const [listWidth, setListWidth] = useState(46)
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark')
+  const [theme, setTheme] = useState<'dark' | 'light'>('light')
   const logKey = useRef<string | undefined>(undefined)
   const refreshing = useRef(false)
   const queued = useRef(new Set<RefreshScope>())

@@ -222,7 +222,7 @@ export function buildCommands(d: CommandDeps): Cmd[] {
     // ---------------------------------------------------------------- view
     { id: 'view.console', title: 'View: Toggle Hook Console', keys: 'Mod+`', run: () => d.toggleConsole() },
     { id: 'view.sidebar', title: 'View: Toggle Sidebar', keys: 'Mod+\\', when: has, run: () => d.toggleSidebar() },
-    { id: 'view.theme', title: 'View: Toggle Light / Dark Theme', run: () => d.toggleTheme() },
+    { id: 'view.theme', title: 'View: Toggle Paper / Chalkboard Theme', run: () => d.toggleTheme() },
     { id: 'view.refresh', title: 'View: Refresh', keys: 'F5', when: has, run: () => d.refresh() },
     { id: 'app.settings', title: 'Preferences: Settings', detail: 'hook environment, PATH, timeout, diagnostics', keys: 'Mod+,', run: () => d.openSettings() }
   ]
