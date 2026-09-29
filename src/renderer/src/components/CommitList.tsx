@@ -170,10 +170,12 @@ interface RowProps {
 
 const Row = memo(function Row({ c, g, top, selected, filtered, graphWidth, onSelect, onContext, onRefContext }: RowProps) {
   const isHead = c.refs.some((r) => r.type === 'head')
+  // Branch labels take the color of the graph line at this commit.
+  const laneColor = filtered ? undefined : LANES[g.color].c
   return (
     <div
       className={`commit-row ${selected ? 'selected' : ''}`}
-      style={{ top }}
+      style={{ top, ['--ref-lane' as string]: laneColor }}
       onClick={() => onSelect(c.sha)}
       onContextMenu={(e) => {
         e.preventDefault()

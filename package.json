@@ -1,7 +1,7 @@
 {
   "name": "odysseus",
   "productName": "Odysseus",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "A fast Git client with first-class Git hook support",
   "main": "./out/main/index.js",
   "author": "Odysseus",
@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "esbuild scripts/smoke-test.ts --bundle --platform=node --format=esm --outfile=out/smoke-test.mjs --alias:@shared=./src/shared --log-level=warning && node out/smoke-test.mjs",
     "dist": "npm run build && electron-builder",
-    "dist:portable": "npm run build && electron-builder --win portable"
+    "dist:portable": "npm run build && electron-builder --win portable",
+    "dist:win": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dist-win.ps1"
   },
   "build": {
     "appId": "com.odysseus.git",
@@ -29,6 +30,7 @@
     ],
     "win": {
       "target": [
+        "nsis",
         "portable",
         "zip"
       ]
@@ -49,6 +51,16 @@
     },
     "portable": {
       "artifactName": "Odysseus-${version}-portable.exe"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Odysseus",
+      "include": "installer/installer.nsh",
+      "artifactName": "Odysseus-${version}-setup.exe"
     }
   },
   "dependencies": {

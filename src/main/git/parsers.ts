@@ -143,14 +143,20 @@ function parseRefs(d: string): RefLabel[] {
 /**
  * Assigns each commit (in topo order) a lane and computes the edges drawn in the top and
  * bottom halves of its row. Classic "lane reservation" layout used by most Git GUIs.
+ *
+ * Where several lines meet in one commit, the line that continues below it (and colors the
+ * commit and its branch labels) is the checked-out branch's line, else the one whose branch
+ * tip is newest. Lane positions don't change, only which color carries on.
  */
 export function layoutGraph(commits: Commit[]): GraphRow[] {
   const lanes: (string | null)[] = []
   const laneColors: number[] = []
+  // Priority of each lane's line: leads to HEAD, then the date of its branch tip.
+  const laneRank: { head: boolean; date: number }[] = []
   let nextColor = 0
   const rows: GraphRow[] = []
 
-  const alloc = (sha: string): number => {
+  const alloc = (sha: string, rank: { head: boolean; date: number }): number => {
     let idx = lanes.indexOf(null)
     if (idx === -1) {
       idx = lanes.length
@@ -158,18 +164,24 @@ export function layoutGraph(commits: Commit[]): GraphRow[] {
     }
     lanes[idx] = sha
     laneColors[idx] = nextColor++ % 8
+    laneRank[idx] = rank
     return idx
   }
+  const outranks = (a: number, b: number) =>
+    laneRank[a].head !== laneRank[b].head ? laneRank[a].head : laneRank[a].date > laneRank[b].date
 
   for (const c of commits) {
     const top: GraphEdge[] = []
     const matching: number[] = []
     lanes.forEach((s, i) => s === c.sha && matching.push(i))
+    const isHead = c.refs.some((r) => r.type === 'head')
 
     let node: number
-    if (matching.length === 0) node = alloc(c.sha)
+    if (matching.length === 0) node = alloc(c.sha, { head: isHead, date: c.date })
     else node = matching[0]
-    const color = laneColors[node]
+    const winner = matching.reduce((w, i) => (outranks(i, w) ? i : w), node)
+    const color = laneColors[winner]
+    const rank = { head: isHead || laneRank[winner].head, date: laneRank[winner].date }
 
     lanes.forEach((s, i) => {
       if (s === null) return
@@ -183,10 +195,12 @@ export function layoutGraph(commits: Commit[]): GraphRow[] {
 
     const bottom: GraphEdge[] = []
     lanes[node] = c.parents[0] ?? null
+    laneColors[node] = color
+    laneRank[node] = rank
     const mergeTargets = new Set<number>()
     for (const p of c.parents.slice(1)) {
       let target = lanes.indexOf(p)
-      if (target === -1) target = alloc(p)
+      if (target === -1) target = alloc(p, { head: false, date: c.date })
       mergeTargets.add(target)
       bottom.push({ fromLane: node, toLane: target, color: laneColors[target] })
     }

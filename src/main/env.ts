@@ -56,7 +56,15 @@ export async function initEnv(settings: Settings): Promise<void> {
 
 /** On Windows, make sure Git for Windows' POSIX tools (sh, sed, etc.) are reachable. */
 function windowsGitDirs(gitPath: string): string[] {
-  const resolved = which(gitPath, process.env.PATH || '')
+  let resolved = which(gitPath, process.env.PATH || '')
+  // Git installed moments ago (e.g. by our installer) isn't on the PATH we inherited yet.
+  if (!resolved && gitPath === 'git') {
+    const cmdDir = [
+      join(process.env.ProgramFiles || 'C:\\Program Files', 'Git', 'cmd'),
+      join(process.env.LOCALAPPDATA || '', 'Programs', 'Git', 'cmd')
+    ].find((d) => existsSync(join(d, 'git.exe')))
+    if (cmdDir) return [cmdDir, ...windowsGitDirs(join(cmdDir, 'git.exe'))]
+  }
   if (!resolved) return []
   // <root>/cmd/git.exe or <root>/mingw64/bin/git.exe
   let root = dirname(dirname(resolved))

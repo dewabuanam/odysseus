@@ -312,6 +312,20 @@ async function main() {
     assert.ok(rows[3].top.some((e) => e.fromLane === 1 && e.toLane === 0), 'lane 1 converges into C')
   })
 
+  await test('graph layout unit: shared commit takes the checked-out, then newest, line color', async () => {
+    type Ref = { name: string; type: 'head' | 'branch' }
+    const mk = (sha: string, parents: string[], date: number, refs: Ref[] = []) =>
+      ({ sha, parents, author: '', email: '', date, subject: '', refs })
+    // A (older tip) and B (newer tip) both fork from C, where `main` points.
+    const byDate = layoutGraph([mk('A', ['C'], 1), mk('B', ['C'], 2), mk('C', [], 0, [{ name: 'main', type: 'branch' }])])
+    assert.equal(byDate[2].lane, 0, 'lane positions unchanged')
+    assert.equal(byDate[2].color, byDate[1].color, 'newest tip wins')
+    // Same shape, but the older A is checked out.
+    const head: Ref[] = [{ name: 'HEAD', type: 'head' }, { name: 'a', type: 'branch' }]
+    const byHead = layoutGraph([mk('A', ['C'], 1, head), mk('B', ['C'], 2), mk('C', [], 0)])
+    assert.equal(byHead[2].color, byHead[0].color, 'checked-out branch wins over a newer one')
+  })
+
   await test('untracked file diff and stash round-trip', async () => {
     writeFileSync(join(dir, 'new.txt'), 'brand new\n')
     const d = await repo.diff({ kind: 'unstaged', path: 'new.txt', untracked: true })

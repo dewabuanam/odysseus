@@ -33,10 +33,39 @@ Grab the latest build from [Releases](https://github.com/dewabuanam/odysseus/rel
 
 | File | What it is |
 |---|---|
+| `Odysseus-<version>-setup.exe` | Windows **installer** (recommended). Installs for you or for all users, adds Start menu and desktop shortcuts and an uninstaller, and **installs Git for you** when it's missing. |
 | `Odysseus-<version>-portable.exe` | Windows, single file, **no install**. Keeps its settings in an `odysseus-data` folder next to the exe, so it runs from a USB stick. |
 | `Odysseus-<version>-win.zip` | Windows, unzip and run `Odysseus.exe`. Add an empty `odysseus-data` folder beside it for portable mode. |
+| `odysseus-codesign.cer`, `install-certificate.ps1` | The public certificate the builds are signed with, and a script that trusts it. See [Code signing](#code-signing). |
+| `SHA256SUMS.txt` | Checksums of every file above. |
 
-Requires **Git 2.36+** on your `PATH`. The builds aren't code-signed yet, so Windows SmartScreen asks for confirmation on first launch (*More info*, then *Run anyway*).
+Odysseus requires **Git 2.36+**. The portable and zip builds use the `git` on your `PATH`.
+
+### The installer and Git
+
+Before installing anything, `setup.exe` looks for Git 2.36 or newer (on `PATH`, in the Git for Windows registry entry, and in the default install folders). If Git is missing or too old:
+
+1. Setup tells you it will install Git for Windows first. Cancel stops the whole setup.
+2. It downloads the latest official Git for Windows installer (64-bit or ARM64) from `github.com/git-for-windows`.
+3. It checks the download's digital signature and only runs it if it's validly signed by the Git for Windows maintainer.
+4. Git installs silently with its default options. Windows asks for administrator permission for this step only.
+5. If anything fails (offline, permission declined), you can **Retry** or cancel. Setup doesn't continue without Git.
+
+Silent installs (`setup.exe /S`) do the same without prompts and exit if Git can't be installed.
+
+### Code signing
+
+The Windows builds are signed with a **self-signed** Odysseus certificate (thumbprint `8BA7F8403BDBDB07C8ADA30688B5D1FE6293C9D1`). It isn't issued by a public certificate authority, so until you trust it, Windows shows the publisher as unknown. To trust it for your Windows account, download `odysseus-codesign.cer` and `install-certificate.ps1` from the release into one folder and run:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install-certificate.ps1
+```
+
+The script refuses a certificate with any other thumbprint. Windows asks you to confirm, and no administrator rights are needed. After that, the installer and app show **Odysseus** as a verified publisher. To undo it, run the script with `-Remove`.
+
+SmartScreen can still show *Windows protected your PC* for a new release until the download builds reputation. Choose *More info*, then *Run anyway*. You can also check a file yourself: right-click it, choose *Properties*, then *Digital Signatures*.
+
+Only trust a certificate if you trust where it came from. You can always skip this and compare a file's hash against `SHA256SUMS.txt` instead.
 
 ## Features
 
@@ -77,7 +106,7 @@ Right-click a commit or a branch for full context menus: checkout, delete, renam
 - **Submodules**, nested ones included: state at a glance, open in a tab, update, add, sync, deinit, and pull or fetch recursively.
 - **Stashes, tags, remotes**, fetch / pull / push with upstream setup.
 - **Recovery prompts**: when local changes block a command, stash them, retry, and restore them; when git has no author identity, set it in two keystrokes.
-- **Paper & pencil look** in black and white, with colored-pencil graph lanes, and a **chalkboard** dark theme.
+- **Paper & pencil look** in black and white, with colored-pencil graph lanes (branch labels take the color of their line, favoring the checked-out branch, then the newest), and a **chalkboard** dark theme.
 
 ![Chalkboard theme](docs/screenshots/chalkboard.png)
 
@@ -143,8 +172,11 @@ npm install
 npm run dev             # run with hot reload
 npm test                # end-to-end tests of the git engine against real repositories
 npm run dist:portable   # Windows portable .exe into dist/
+npm run dist:win        # signed Windows release: setup.exe, portable.exe, zip, checksums
 npm run dist            # every target for the current OS
 ```
+
+`npm run dist:win` signs with the key in `%USERPROFILE%\.odysseus-signing\` and builds unsigned when that key isn't there. To create a signing key, run `scripts/new-signing-cert.ps1`. It writes the private `.pfx` and its password to that folder, outside the repository, and exports the public certificate to `certs/`. Never commit the `.pfx`. `.gitignore` excludes `*.pfx`, `*.p12` and `*.key`. The installer's Git check lives in `installer/`.
 
 Odysseus is built with Electron, React and TypeScript. The git engine (`src/main/git`) drives the real `git` CLI; the test suite (`scripts/smoke-test.ts`) exercises it end to end: hooks, the queue, conflicts, history editing, submodules and search.
 

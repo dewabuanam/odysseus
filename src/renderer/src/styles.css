@@ -232,11 +232,11 @@ kbd {
 .commit-row .date { width: 78px; color: var(--ink-3); font-size: 12px; text-align: right; }
 .commit-row.wip .subject { font-family: var(--hand); font-size: 16px; }
 .ref { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: var(--sketch); margin-right: 4px; line-height: 16px; vertical-align: 1px; border: 1px solid var(--ink); }
-.ref.branch { background: transparent; }
-.ref.branch.head { background: var(--ink); color: var(--paper); font-weight: 700; }
-.ref.remote { border-style: dashed; color: var(--ink-2); }
+.ref.branch { background: transparent; border-color: var(--ref-lane, var(--ink)); color: var(--ref-lane, var(--ink)); }
+.ref.branch.head { background: var(--ref-lane, var(--ink)); border-color: var(--ref-lane, var(--ink)); color: var(--paper); font-weight: 700; }
+.ref.remote { border-style: dashed; border-color: var(--ref-lane, var(--ink)); color: var(--ref-lane, var(--ink-2)); }
 .ref.tag { border-radius: 2px 9px 9px 2px; background-image: repeating-linear-gradient(-45deg, var(--shade) 0 2px, transparent 2px 4px); }
-.ref.headref { font-weight: 700; }
+.ref.headref { font-weight: 700; border-color: var(--ref-lane, var(--ink)); color: var(--ref-lane, var(--ink)); }
 
 /* ---------- detail panes */
 .detail { padding: 14px 16px 40px; }

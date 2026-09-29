@@ -4,3 +4,9 @@ dist/
 *.log
 .DS_Store
 release/
+
+# Code-signing secrets never belong in the repo
+*.pfx
+*.p12
+*.key
+.odysseus-signing/
