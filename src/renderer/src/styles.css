@@ -224,10 +224,14 @@ kbd {
 .list-header { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
 .list-header .input { border-width: 0 0 1px; border-radius: 0; }
 .commit-scroll { flex: 1; overflow-y: auto; position: relative; }
-.commit-row { position: absolute; left: 0; right: 0; height: 26px; display: flex; align-items: center; gap: 8px; padding-right: 10px; cursor: pointer; }
+.commit-row { position: absolute; left: 0; right: 0; height: 26px; display: flex; align-items: flex-start; gap: 8px; padding-right: 10px; cursor: pointer; }
+.commit-row > span { line-height: 26px; }
 .commit-row:hover { background: var(--hover); }
 .commit-row.selected { background: var(--sel); }
 .commit-row .subject { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.commit-row .message { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.commit-row .message .subject { flex: none; line-height: 26px; }
+.commit-row .refs { height: 20px; line-height: 16px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; margin-top: -3px; }
 .commit-row .author { width: 110px; color: var(--ink-2); font-size: 12px; }
 .commit-row .date { width: 78px; color: var(--ink-3); font-size: 12px; text-align: right; }
 .commit-row.wip .subject { font-family: var(--hand); font-size: 16px; }

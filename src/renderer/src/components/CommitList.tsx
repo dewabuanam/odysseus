@@ -3,6 +3,8 @@ import type { Commit, GraphRow, WorkingStatus } from '@shared/types'
 import { relTime } from '../ui'
 
 const ROW_H = 26
+// Extra height for the line of branch labels under a commit message
+const REFS_H = 20
 const LANE_W = 14
 const MAX_LANES = 14
 // Colored-pencil lanes: the one splash of color in the paper theme (see --lane-* tokens).
@@ -26,17 +28,19 @@ const EMPTY_ROW: GraphRow = { lane: 0, color: 0, top: [], bottom: [], width: 1 }
 
 const x = (lane: number) => 10 + Math.min(lane, MAX_LANES) * LANE_W
 
-function GraphCell({ row, width, isHead }: { row: GraphRow; width: number; isHead: boolean }) {
+const hasLabels = (c: Commit) => c.refs.length > 0
+
+function GraphCell({ row, width, height, isHead }: { row: GraphRow; width: number; height: number; isHead: boolean }) {
   const mid = ROW_H / 2
   const path = (x1: number, y1: number, x2: number, y2: number) =>
     x1 === x2 ? `M${x1} ${y1}L${x2} ${y2}` : `M${x1} ${y1}C${x1} ${(y1 + y2) / 2} ${x2} ${(y1 + y2) / 2} ${x2} ${y2}`
   return (
-    <svg width={width} height={ROW_H} style={{ flexShrink: 0 }}>
+    <svg width={width} height={height} style={{ flexShrink: 0 }}>
       {row.top.map((e, i) => (
         <path key={`t${i}`} d={path(x(e.fromLane), 0, x(e.toLane), mid)} stroke={LANES[e.color].c} strokeDasharray={LANES[e.color].d} strokeWidth={2} strokeLinecap="round" fill="none" opacity={0.85} />
       ))}
       {row.bottom.map((e, i) => (
-        <path key={`b${i}`} d={path(x(e.fromLane), mid, x(e.toLane), ROW_H)} stroke={LANES[e.color].c} strokeDasharray={LANES[e.color].d} strokeWidth={2} strokeLinecap="round" fill="none" opacity={0.85} />
+        <path key={`b${i}`} d={path(x(e.fromLane), mid, x(e.toLane), height)} stroke={LANES[e.color].c} strokeDasharray={LANES[e.color].d} strokeWidth={2} strokeLinecap="round" fill="none" opacity={0.85} />
       ))}
       <circle
         cx={x(row.lane)}
@@ -79,8 +83,25 @@ export function CommitList({ commits, graph, status, selected, active = true, re
 
   const offset = showWip ? 1 : 0
   const total = rows.length + offset
-  const first = Math.max(0, Math.floor(scrollTop / ROW_H) - 10)
-  const last = Math.min(total, Math.ceil((scrollTop + height) / ROW_H) + 10)
+  // Top of each row, plus the total height at the end. Rows with labels are taller.
+  const tops = useMemo(() => {
+    const t = [0]
+    if (showWip) t.push(ROW_H)
+    for (const r of rows) t.push(t[t.length - 1] + ROW_H + (hasLabels(r.c) ? REFS_H : 0))
+    return t
+  }, [rows, showWip])
+  const rowAt = (y: number) => {
+    let lo = 0
+    let hi = Math.max(0, total - 1)
+    while (lo < hi) {
+      const m = (lo + hi + 1) >> 1
+      if (tops[m] <= y) lo = m
+      else hi = m - 1
+    }
+    return lo
+  }
+  const first = Math.max(0, rowAt(scrollTop) - 10)
+  const last = Math.min(total, rowAt(scrollTop + height) + 10)
 
   // Keyboard navigation
   useEffect(() => {
@@ -95,13 +116,14 @@ export function CommitList({ commits, graph, status, selected, active = true, re
         e.preventDefault()
         onSelect(next)
         const el = scrollRef.current
-        const pos = ids.indexOf(next) * ROW_H
-        if (el && (pos < el.scrollTop || pos > el.scrollTop + el.clientHeight - ROW_H)) el.scrollTop = pos - el.clientHeight / 2
+        const i = ids.indexOf(next)
+        const pos = tops[i]
+        if (el && (pos < el.scrollTop || tops[i + 1] > el.scrollTop + el.clientHeight)) el.scrollTop = pos - el.clientHeight / 2
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [rows, selected, showWip, onSelect, active])
+  }, [rows, tops, selected, showWip, onSelect, active])
 
   const items: React.ReactNode[] = []
   for (let i = first; i < last; i++) {
@@ -132,7 +154,8 @@ export function CommitList({ commits, graph, status, selected, active = true, re
         key={c.sha}
         c={c}
         g={g}
-        top={i * ROW_H}
+        top={tops[i]}
+        height={tops[i + 1] - tops[i]}
         selected={selected === c.sha}
         filtered={filtered}
         graphWidth={graphWidth}
@@ -149,7 +172,7 @@ export function CommitList({ commits, graph, status, selected, active = true, re
       <>
         {filtered && rows.length === 0 && <div className="empty">No commits match this search.</div>}
         <div className="commit-scroll" ref={scrollRef} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
-          <div style={{ height: total * ROW_H, position: 'relative' }}>{items}</div>
+          <div style={{ height: tops[total], position: 'relative' }}>{items}</div>
         </div>
       </>
     )
@@ -160,6 +183,7 @@ interface RowProps {
   c: Commit
   g: GraphRow
   top: number
+  height: number
   selected: boolean
   filtered: boolean
   graphWidth: number
@@ -168,14 +192,14 @@ interface RowProps {
   onRefContext?(e: React.MouseEvent, name: string): void
 }
 
-const Row = memo(function Row({ c, g, top, selected, filtered, graphWidth, onSelect, onContext, onRefContext }: RowProps) {
+const Row = memo(function Row({ c, g, top, height, selected, filtered, graphWidth, onSelect, onContext, onRefContext }: RowProps) {
   const isHead = c.refs.some((r) => r.type === 'head')
   // Branch labels take the color of the graph line at this commit.
   const laneColor = filtered ? undefined : LANES[g.color].c
   return (
     <div
       className={`commit-row ${selected ? 'selected' : ''}`}
-      style={{ top, ['--ref-lane' as string]: laneColor }}
+      style={{ top, height, ['--ref-lane' as string]: laneColor }}
       onClick={() => onSelect(c.sha)}
       onContextMenu={(e) => {
         e.preventDefault()
@@ -183,30 +207,35 @@ const Row = memo(function Row({ c, g, top, selected, filtered, graphWidth, onSel
         onContext(e, c)
       }}
     >
-      {filtered ? <div style={{ width: 10 }} /> : <GraphCell row={g} width={graphWidth} isHead={isHead} />}
-      <span className="subject">
-        {c.refs
-          .filter((r) => r.type !== 'head')
-          .map((r) => (
-            <span
-              key={r.type + r.name}
-              className={`ref ${r.type} ${isHead && r.type === 'branch' && c.refs.findIndex((x) => x.type === 'head') === c.refs.indexOf(r) - 1 ? 'head' : ''}`}
-              onContextMenu={
-                r.type === 'branch' || r.type === 'remote'
-                  ? (e) => {
-                      e.preventDefault()
-                      e.stopPropagation()
-                      onRefContext?.(e, r.name)
-                    }
-                  : undefined
-              }
-            >
-              {r.name}
-            </span>
-          ))}
-        {isHead && !c.refs.some((r) => r.type === 'branch') && <span className="ref headref">HEAD</span>}
-        {c.subject}
-      </span>
+      {filtered ? <div style={{ width: 10 }} /> : <GraphCell row={g} width={graphWidth} height={height} isHead={isHead} />}
+      <div className="message">
+        <span className="subject">{c.subject}</span>
+        {/* Labels sit on their own line under the message so they never hide it */}
+        {hasLabels(c) && (
+          <div className="refs">
+            {c.refs
+              .filter((r) => r.type !== 'head')
+              .map((r) => (
+                <span
+                  key={r.type + r.name}
+                  className={`ref ${r.type} ${isHead && r.type === 'branch' && c.refs.findIndex((x) => x.type === 'head') === c.refs.indexOf(r) - 1 ? 'head' : ''}`}
+                  onContextMenu={
+                    r.type === 'branch' || r.type === 'remote'
+                      ? (e) => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          onRefContext?.(e, r.name)
+                        }
+                      : undefined
+                  }
+                >
+                  {r.name}
+                </span>
+              ))}
+            {isHead && !c.refs.some((r) => r.type === 'branch') && <span className="ref headref">HEAD</span>}
+          </div>
+        )}
+      </div>
       <span className="author ellipsis">{c.author}</span>
       <span className="date" title={new Date(c.date).toLocaleString()}>
         {relTime(c.date)}
