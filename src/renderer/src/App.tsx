@@ -20,6 +20,7 @@ import { RepoView, type TabHandle, type TabInfo } from './RepoView'
 import { norm, runStore } from './runs'
 import { UiProvider, useUi } from './ui'
 import { SettingsDialog } from './components/SettingsDialog'
+import { AboutDialog, HOMEPAGE } from './components/AboutDialog'
 import { TabBar } from './components/TabBar'
 import { TitleBar } from './components/TitleBar'
 import { Welcome } from './components/Welcome'
@@ -74,12 +75,14 @@ function Shell() {
   const [info, setInfo] = useState<Record<string, TabInfo>>({})
   const [palette, setPalette] = useState<Step | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [aboutOpen, setAboutOpen] = useState(false)
   const [theme, setTheme] = useState<'dark' | 'light'>('light')
   const [keymap, setKeymap] = useState<Keymap>('default')
   const [workspaces, setWorkspacesState] = useState<Workspace[]>([])
   const [appSettings, setAppSettings] = useState<Settings | null>(null)
   const [termOpen, setTermOpen] = useState(false)
-  const [termUsed, setTermUsed] = useState(false)
+  // Mounted from the start so the default AI can boot in the background before it's opened.
+  const [termUsed, setTermUsed] = useState(true)
   const [aiStates, setAiStates] = useState<Record<string, AiState>>({})
   const [aiWorking, setAiWorking] = useState(0)
   const termRef = useRef<TerminalHandle>(null)
@@ -457,6 +460,9 @@ function Shell() {
         }))
       })
     },
+    { id: 'help.about', title: 'Help: About Odysseus', detail: 'version, Git and runtime versions', run: () => setAboutOpen(true) },
+    { id: 'help.releases', title: 'Help: Check for Updates', detail: 'opens the releases page', run: () => { api.openUrl(`${HOMEPAGE}/releases`) } },
+    { id: 'help.homepage', title: 'Help: Odysseus on GitHub', run: () => { api.openUrl(HOMEPAGE) } },
     { id: 'app.shortcuts', title: 'Preferences: Keyboard Shortcuts', detail: KEYMAP_NAMES[keymap], run: () => shortcutsStep() }
   ]
 
@@ -491,7 +497,7 @@ function Shell() {
     let lastShift = 0
     let chord: { first: string; at: number } | null = null
     const onKey = (e: KeyboardEvent) => {
-      if (palette || settingsOpen) return
+      if (palette || settingsOpen || aboutOpen) return
       // Keys typed into the terminal pane belong to the program running there (shells, AI
       // CLIs); only the terminal toggle itself still works.
       if ((e.target as HTMLElement).closest?.('.term-pane')) {
@@ -572,7 +578,7 @@ function Shell() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [palette, settingsOpen, keymap, openPalette])
+  }, [palette, settingsOpen, aboutOpen, keymap, openPalette])
 
   if (booting) return <div className="app" />
 
@@ -589,6 +595,7 @@ function Shell() {
         paletteKeys={bindings['app.palette']?.[0]}
         onParent={() => activeInfo?.superproject && openRepo(activeInfo.superproject)}
         onPalette={() => openPalette()}
+        onAbout={() => setAboutOpen(true)}
         onBranchMenu={() => {
           const c = allCommandsRef.current().find((x) => x.id === 'branch.checkout')
           if (c) run(c)
@@ -645,6 +652,8 @@ function Shell() {
             setAiWorking(n)
           }} open={termOpen && !!activeTab} onClose={() => setTermOpen(false)} />}
       </div>
+
+      {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}
 
       {palette && <Palette initial={palette} onClose={() => setPalette(null)} />}
 

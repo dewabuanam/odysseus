@@ -72,7 +72,7 @@ export function Sidebar({ selected, view, onSelectWorking, onShowHooks }: Props)
             title={`${b.upstream ? `tracking ${b.upstream}` : 'no upstream'}${isHidden(b) ? ' (hidden from graph)' : ''}`}
           >
             <BranchMark lane={repo.laneColors.get(b.sha)} current={b.current} dotted={b.current && changes > 0} />
-            <span className="ellipsis">{b.name}</span>
+            <RefName name={b.name} lane={repo.laneColors.get(b.sha)} kind={b.current ? 'branch head' : 'branch'} />
             {(b.ahead || b.behind) ? (
               <span className="ab">
                 {b.ahead ? `↑${b.ahead}` : ''}
@@ -90,7 +90,7 @@ export function Sidebar({ selected, view, onSelectWorking, onShowHooks }: Props)
             {rb.map((b) => (
               <div key={b.fullRef} className={`sb-item ${isHidden(b) ? 'hidden-ref' : ''}`} onClick={() => repo.select(b.sha)} onContextMenu={(e) => branchMenu(e, b)} onDoubleClick={() => repo.exec(() => api.checkoutRemote(b.name))}>
                 <BranchMark lane={repo.laneColors.get(b.sha)} />
-                <span className="ellipsis">{b.name.slice(r.name.length + 1)}</span>
+                <RefName name={b.name.slice(r.name.length + 1)} lane={repo.laneColors.get(b.sha)} kind="remote" />
               </div>
             ))}
           </Section>
@@ -232,5 +232,14 @@ function BranchMark({ lane, current = false, dotted = false }: { lane?: number; 
       <line x1="7" y1="0" x2="7" y2="22" stroke={color} strokeWidth="2" strokeDasharray={dash} opacity={0.85} />
       <circle cx="7" cy="11" r={current ? 4 : 3.4} fill={current ? color : 'var(--paper-2)'} stroke={color} strokeWidth="1.8" />
     </svg>
+  )
+}
+
+/** A branch name drawn like its label in the commit graph: same color, filled when checked out, dashed for remotes. */
+function RefName({ name, lane, kind }: { name: string; lane?: number; kind: 'branch' | 'branch head' | 'remote' }) {
+  return (
+    <span className={`ref ${kind} sb-ref ellipsis`} style={lane === undefined ? undefined : ({ '--ref-lane': `var(--lane-${lane})` } as React.CSSProperties)}>
+      {name}
+    </span>
   )
 }

@@ -99,6 +99,10 @@ export function SettingsDialog({ onClose, onSaved }: { onClose(): void; onSaved(
         </div>
         <div className="field grow">
           <span>Programs (one per line: Name = command)</span>
+          <label className="check" style={{ marginBottom: 6 }}>
+            <input type="checkbox" checked={s.terminalPrewarm !== false} onChange={(e) => setS({ ...s, terminalPrewarm: e.target.checked })} />
+            Start the default AI in the background so it opens instantly (uses memory for one extra session)
+          </label>
           <textarea className="textarea mono" rows={3} value={profilesText} placeholder={'Claude Code = claude\nCodex = codex'} onChange={(e) => setProfilesText(e.target.value)} />
         </div>
       </div>

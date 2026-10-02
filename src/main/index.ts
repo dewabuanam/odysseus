@@ -309,6 +309,16 @@ const appApi: Record<string, Handler> = {
   },
   history: (root?: string, limit?: number) => getHistory(root, limit),
   openExternal: (p: string) => shell.openPath(p),
+  /** Opens a web link in the browser; only https links are allowed. */
+  openUrl: (url: string) => (/^https:\/\//.test(url) ? shell.openExternal(url) : undefined),
+  appInfo: () => ({
+    version: app.getVersion(),
+    electron: process.versions.electron,
+    chrome: process.versions.chrome,
+    node: process.versions.node,
+    os: `${process.platform} ${process.getSystemVersion()} ${process.arch}`,
+    dataDir: app.getPath('userData')
+  }),
   showInFolder: (p: string) => shell.showItemInFolder(p),
   cancelRun: (id: string) => runner.cancel(id),
   termCreate: (cwd: string, cols: number, rows: number, profile: TerminalProfile) =>

@@ -15,6 +15,7 @@ interface Props {
   paletteKeys?: string
   onParent(): void
   onPalette(): void
+  onAbout(): void
   onBranchMenu(): void
   terminalOpen: boolean
   /** Name of the default AI program, shown on the pane button */
@@ -24,7 +25,7 @@ interface Props {
 }
 
 /** Frameless window chrome: repository tabs, branch switcher, palette trigger, window controls. */
-export function TitleBar({ repoName, active, status, parent, paletteKeys, onParent, onPalette, onBranchMenu, terminalOpen, aiName, terminalKeys, onTerminal }: Props) {
+export function TitleBar({ repoName, active, status, parent, paletteKeys, onParent, onPalette, onAbout, onBranchMenu, terminalOpen, aiName, terminalKeys, onTerminal }: Props) {
   const [platform, setPlatform] = useState<string>('win32')
   const [maximized, setMaximized] = useState(false)
   const runs = useRuns()
@@ -44,7 +45,11 @@ export function TitleBar({ repoName, active, status, parent, paletteKeys, onPare
 
   return (
     <div className={`titlebar ${mac ? 'mac' : ''}`}>
-      {!mac && <img src={logo} className="tb-logo" alt="" />}
+      {!mac && (
+        <button className="tb-logo-btn" onClick={onAbout} title="About Odysseus">
+          <img src={logo} className="tb-logo" alt="About Odysseus" />
+        </button>
+      )}
       {active && (
         <>
           <span className="tb-repo">{repoName}</span>

@@ -312,6 +312,8 @@ export interface Settings {
   terminalProfiles: TerminalProfile[]
   /** Profile name the terminal pane starts when it opens ('Shell' for a plain shell) */
   terminalDefault: string
+  /** Start the default AI in the background so opening it is instant */
+  terminalPrewarm: boolean
 }
 
 /** A program the terminal pane can start, run inside the configured shell. */

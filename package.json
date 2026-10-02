@@ -1,7 +1,7 @@
 {
   "name": "odysseus",
   "productName": "Odysseus",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "description": "A fast Git client with first-class Git hook support",
   "main": "./out/main/index.js",
   "author": "Odysseus",
@@ -85,5 +85,10 @@
     "electron-vite": "^5.0.0",
     "typescript": "^7.0.2",
     "vite": "^7.3.6"
+  },
+  "homepage": "https://github.com/dewabuanam/odysseus",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dewabuanam/odysseus.git"
   }
 }

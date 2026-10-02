@@ -544,3 +544,18 @@ body:has(.overlay, .palette-overlay) .titlebar * { -webkit-app-region: no-drag; 
 .st.st-D { color: var(--diff-del-ink); border-color: var(--diff-del-ink); }
 .st.st-M, .st.st-R { color: var(--ai-working); border-color: var(--ai-working); }
 .sb-item .branch-mark { margin: -4px 0; flex-shrink: 0; }
+.sb-ref { font-size: 12px; line-height: 17px; margin-right: 0; min-width: 0; max-width: 100%; font-family: var(--sans); }
+
+/* ---------- about */
+.tb-logo-btn { background: none; border: 0; padding: 0 2px; display: flex; align-items: center; cursor: pointer; border-radius: 4px; }
+.tb-logo-btn:hover { background: var(--hover); }
+.about { text-align: center; }
+.about-logo { height: 96px; width: auto; margin: 4px 0 6px; }
+:root[data-theme='dark'] .about-logo { filter: invert(1); }
+.about h2 { font-family: var(--hand); font-weight: 400; letter-spacing: 0.12em; margin: 0; font-size: 32px; }
+.about-tag { font-family: var(--hand); font-size: 16px; color: var(--ink-2); }
+.about-version { margin: 8px 0 12px; font-weight: 700; }
+.about-table { width: auto !important; margin: 0 auto; text-align: left; }
+.about-table td { padding: 2px 10px !important; }
+.about-table a, .about-links a { color: var(--ink); }
+.about-links { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 12px; font-size: 12.5px; }

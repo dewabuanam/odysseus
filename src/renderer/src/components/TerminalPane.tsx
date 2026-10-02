@@ -31,6 +31,8 @@ interface Session {
   exited: boolean
   /** AI sessions only: what the program is doing */
   ai: AiState | null
+  /** Started ahead of time in the background; becomes a real session when the AI is opened */
+  spare?: boolean
 }
 
 const SHELL: TerminalProfile = { name: 'Shell', command: '' }
@@ -81,7 +83,7 @@ export function TerminalPane({ scopes, live, open, onClose, onAiStates, ref }: P
   })
 
   const scope = (preferRepo && scopes.find((s) => s.kind === 'repo')) || scopes[0] || null
-  const mine = sessions.filter((s) => s.scope === scope?.key)
+  const mine = sessions.filter((s) => s.scope === scope?.key && !s.spare)
   const active = scope ? activeBy[scope.key] ?? mine[mine.length - 1]?.key : undefined
 
   const loadSettings = useCallback(async () => {
@@ -94,18 +96,45 @@ export function TerminalPane({ scopes, live, open, onClose, onAiStates, ref }: P
   }, [])
 
   useEffect(() => {
-    if (open) loadSettings()
+    loadSettings()
   }, [open, loadSettings])
 
   const start = useCallback(
     (profile: TerminalProfile, sc: TermScope | null = scope) => {
       if (!sc) return
+      // An AI started ahead of time for this place opens instantly instead of booting now.
+      const spare = sessions.find((x) => x.spare && !x.exited && x.scope === sc.key && x.profile.name === profile.name && x.profile.command === profile.command)
+      if (spare) {
+        setSessions((s) => s.map((x) => (x.key === spare.key ? { ...x, spare: false } : x)))
+        setActiveBy((a) => ({ ...a, [sc.key]: spare.key }))
+        return
+      }
       const key = nextKey++
       setSessions((s) => [...s, { key, scope: sc.key, cwd: sc.cwd, title: profile.command ? profile.name : shellName, profile, exited: false, ai: profile.command ? 'working' : null }])
       setActiveBy((a) => ({ ...a, [sc.key]: key }))
     },
-    [scope, shellName]
+    [scope, shellName, sessions]
   )
+
+  // AI CLIs take seconds to boot (Claude Code about 4 to 5). Keep one copy of the default AI
+  // starting in the background for the repository or workspace in view, so opening it is
+  // instant. Only one spare exists at a time; moving elsewhere replaces it.
+  const prewarm = settings?.terminalPrewarm !== false && settings ? defaultProfile(settings) : null
+  useEffect(() => {
+    if (!scope || !prewarm?.command.trim()) {
+      setSessions((s) => (s.some((x) => x.spare) ? s.filter((x) => !x.spare) : s))
+      return
+    }
+    const t = setTimeout(() => {
+      setSessions((s) => {
+        const keep = s.filter((x) => !x.spare || (x.scope === scope.key && x.profile.command === prewarm.command && !x.exited))
+        const busy = keep.some((x) => x.scope === scope.key)
+        if (busy) return keep.length === s.length ? s : keep
+        return [...keep, { key: nextKey++, scope: scope.key, cwd: scope.cwd, title: prewarm.name, profile: prewarm, exited: false, ai: null, spare: true }]
+      })
+    }, 2500)
+    return () => clearTimeout(t)
+  }, [scope?.key, scope?.cwd, prewarm?.name, prewarm?.command])
   const live$ = useRef({ start, scopes, scope, mine })
   live$.current = { start, scopes, scope, mine }
 
@@ -133,16 +162,17 @@ export function TerminalPane({ scopes, live, open, onClose, onAiStates, ref }: P
   const onAi = useCallback((key: number, ai: AiState) => setSessions((s) => s.map((x) => (x.key === key && x.ai !== ai && !x.exited ? { ...x, ai } : x))), [])
 
   // Report the most urgent state per scope (repository or workspace).
-  const aiKey = sessions.map((s) => `${s.scope}=${s.ai ?? ''}`).join('|')
+  const aiKey = sessions.map((s) => `${s.scope}=${s.spare ? '' : s.ai ?? ''}`).join('|')
   const onAiStatesRef = useRef(onAiStates)
   onAiStatesRef.current = onAiStates
   useEffect(() => {
     const out: Record<string, AiState> = {}
     for (const s of sessions) {
+      if (s.spare) continue
       const a = aggregateAi([out[s.scope], s.ai])
       if (a) out[s.scope] = a
     }
-    onAiStatesRef.current(out, sessions.filter((s) => s.ai === 'working').length)
+    onAiStatesRef.current(out, sessions.filter((s) => !s.spare && s.ai === 'working').length)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aiKey])
 

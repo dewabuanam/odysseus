@@ -32,7 +32,8 @@ const DEFAULTS: StoreData = {
       { name: 'Gemini', command: 'gemini' },
       { name: 'Copilot', command: 'copilot' }
     ],
-    terminalDefault: 'Claude Code'
+    terminalDefault: 'Claude Code',
+    terminalPrewarm: true
   },
   recentRepos: [],
   lastRepo: null,
