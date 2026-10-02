@@ -494,11 +494,19 @@ select.input option, select option { background: var(--paper); color: var(--ink)
   background: color-mix(in srgb, var(--group) 42%, var(--paper)); color: var(--ink); position: relative;
 }
 .tab-group:not(.open):hover { background: color-mix(in srgb, var(--group) 60%, var(--paper)); }
-.tab-group.open { cursor: default; }
-/* The open group's line runs from its chip under each of its tabs. */
-.tab-group.open::after { content: ''; position: absolute; left: 50%; right: -5px; bottom: -6px; height: 2.5px; background: var(--group); }
-.tab.grouped { box-shadow: inset 0 -2.5px 0 var(--group); }
-.tab.grouped.active { box-shadow: inset 0 0 0 1.5px var(--group); border-color: var(--group); }
+.tab-group.open { cursor: default; background: var(--group); color: var(--paper); }
+/* An open workspace: one box in the group's color around its chip and its tabs. */
+.tab-group-box {
+  display: flex; align-items: stretch; gap: 2px; flex-shrink: 0; margin: 3px 2px 0; padding: 0 3px 0 2px;
+  border-radius: 9px 9px 0 0; background: color-mix(in srgb, var(--group) 26%, var(--paper-2));
+  box-shadow: inset 0 0 0 1.5px var(--group); border-bottom: 0; position: relative; top: 1.5px;
+}
+.tab-group-box .tab-group { margin: 0 2px 0 1px; }
+.tab-group-box .tab { margin-top: 3px; top: 0; }
+.tab-group-box .tab:not(.active):hover { background: color-mix(in srgb, var(--group) 18%, transparent); }
+.tab-group-box .tab.active { border-color: var(--group); }
+.tab-group-box .tab:not(.active)::after { border-right-color: color-mix(in srgb, var(--group) 55%, transparent); }
+.tab-group-box .tab:last-child::after { display: none; }
 
 /* ---------- work area: repository views beside the AI / terminal pane */
 .workarea { flex: 1; display: flex; min-height: 0; }

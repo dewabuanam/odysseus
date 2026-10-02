@@ -67,57 +67,75 @@ export function TabBar({ tabs, active, workspaces, onSelect, onClose, onNew, onO
   const busy = (path: string) => runs.some((r) => norm(r.root) === norm(path) && r.endedAt === undefined)
   const groupBusy = (w: Workspace) => w.repos.some(busy)
 
+  const renderItem = (item: BarItem) =>
+    item.kind === 'group' ? (
+      <div
+        key={`g:${item.ws.id}`}
+        className={`tab-group ${item.open ? 'open' : ''}`}
+        style={{ '--group': `var(--lane-${item.ws.color})`, maxWidth: chipWidth(item.ws) } as React.CSSProperties}
+        title={`${item.ws.name}: ${item.ws.repos.length} tab${item.ws.repos.length === 1 ? '' : 's'}\n${item.ws.folder}${item.open ? '' : '\nClick to open this workspace'}`}
+        onClick={() => !item.open && onOpenGroup(item.ws)}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          onGroupMenu(e, item.ws)
+        }}
+      >
+        {!item.open && groupBusy(item.ws) && <span className="spinner tiny" />}
+        <AiDot state={groupAi(item.ws)} />
+        <span className="ellipsis">{item.ws.name}</span>
+      </div>
+    ) : (
+      <div
+        key={item.tab.path}
+        className={`tab ${item.tab.path === active ? 'active' : ''} ${item.ws ? 'grouped' : ''}`}
+        style={{ width: TAB_W, ...(item.ws ? ({ '--group': `var(--lane-${item.ws.color})` } as React.CSSProperties) : {}) }}
+        title={item.tab.path}
+        onMouseDown={(e) => {
+          if (e.button === 1) {
+            e.preventDefault()
+            onClose(item.tab.path)
+          }
+        }}
+        onClick={() => onSelect(item.tab.path)}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          onTabMenu(e, item.tab.path)
+        }}
+      >
+        {busy(item.tab.path) && <span className="spinner tiny" />}
+        <AiDot state={repoAi(item.tab.path)} />
+        <span className="ellipsis grow">{item.tab.name}</span>
+        <button
+          className="tab-close"
+          aria-label={`Close ${item.tab.name}`}
+          onClick={(e) => {
+            e.stopPropagation()
+            onClose(item.tab.path)
+          }}
+        >
+          ×
+        </button>
+      </div>
+    )
+
+  // An open group is drawn as one tinted box holding its chip and its tabs.
+  const segments: { box?: Workspace; items: BarItem[] }[] = []
+  for (const item of visible) {
+    const last = segments[segments.length - 1]
+    if (item.kind === 'group' && item.open) segments.push({ box: item.ws, items: [item] })
+    else if (item.kind === 'tab' && item.ws && last?.box?.id === item.ws.id) last.items.push(item)
+    else segments.push({ items: [item] })
+  }
+
   return (
     <div className="tabbar" ref={ref}>
-      {visible.map((item) =>
-        item.kind === 'group' ? (
-          <div
-            key={`g:${item.ws.id}`}
-            className={`tab-group ${item.open ? 'open' : ''}`}
-            style={{ '--group': `var(--lane-${item.ws.color})`, maxWidth: chipWidth(item.ws) } as React.CSSProperties}
-            title={`${item.ws.name}: ${item.ws.repos.length} tab${item.ws.repos.length === 1 ? '' : 's'}\n${item.ws.folder}${item.open ? '' : '\nClick to open this workspace'}`}
-            onClick={() => !item.open && onOpenGroup(item.ws)}
-            onContextMenu={(e) => {
-              e.preventDefault()
-              onGroupMenu(e, item.ws)
-            }}
-          >
-            {!item.open && groupBusy(item.ws) && <span className="spinner tiny" />}
-            <AiDot state={groupAi(item.ws)} />
-            <span className="ellipsis">{item.ws.name}</span>
+      {segments.map((seg) =>
+        seg.box ? (
+          <div key={`box:${seg.box.id}`} className="tab-group-box" style={{ '--group': `var(--lane-${seg.box.color})` } as React.CSSProperties}>
+            {seg.items.map(renderItem)}
           </div>
         ) : (
-          <div
-            key={item.tab.path}
-            className={`tab ${item.tab.path === active ? 'active' : ''} ${item.ws ? 'grouped' : ''}`}
-            style={{ width: TAB_W, ...(item.ws ? ({ '--group': `var(--lane-${item.ws.color})` } as React.CSSProperties) : {}) }}
-            title={item.tab.path}
-            onMouseDown={(e) => {
-              if (e.button === 1) {
-                e.preventDefault()
-                onClose(item.tab.path)
-              }
-            }}
-            onClick={() => onSelect(item.tab.path)}
-            onContextMenu={(e) => {
-              e.preventDefault()
-              onTabMenu(e, item.tab.path)
-            }}
-          >
-            {busy(item.tab.path) && <span className="spinner tiny" />}
-            <AiDot state={repoAi(item.tab.path)} />
-            <span className="ellipsis grow">{item.tab.name}</span>
-            <button
-              className="tab-close"
-              aria-label={`Close ${item.tab.name}`}
-              onClick={(e) => {
-                e.stopPropagation()
-                onClose(item.tab.path)
-              }}
-            >
-              ×
-            </button>
-          </div>
+          seg.items.map(renderItem)
         )
       )}
       {hidden.length > 0 && (
