@@ -579,6 +579,10 @@ function Shell() {
           onSelect={selectTab}
           onClose={closeTab}
           onOpenGroup={openWorkspace}
+          onCollapseGroup={() => {
+            setActive(null)
+            persist(stateRef.current.tabs, null)
+          }}
           repoAi={repoAi}
           groupAi={groupAi}
           onGroupMenu={groupMenu}

@@ -494,7 +494,8 @@ select.input option, select option { background: var(--paper); color: var(--ink)
   background: color-mix(in srgb, var(--group) 42%, var(--paper)); color: var(--ink); position: relative;
 }
 .tab-group:not(.open):hover { background: color-mix(in srgb, var(--group) 60%, var(--paper)); }
-.tab-group.open { cursor: default; background: var(--group); color: var(--paper); }
+.tab-group.open { background: var(--group); color: var(--paper); }
+.tab-group.open:hover { filter: brightness(1.08); }
 /* An open workspace: one box in the group's color around its chip and its tabs. */
 .tab-group-box {
   display: flex; align-items: stretch; gap: 2px; flex-shrink: 0; margin: 3px 2px 0; padding: 0 3px 0 2px;

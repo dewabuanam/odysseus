@@ -20,6 +20,8 @@ interface Props {
   onMove(path: string, index: number): void
   /** A collapsed group's chip was clicked: switch to that group */
   onOpenGroup(w: Workspace): void
+  /** The open group's chip was clicked: collapse it, leaving no tab focused */
+  onCollapseGroup(w: Workspace): void
   onGroupMenu(e: React.MouseEvent, w: Workspace): void
   onTabMenu(e: React.MouseEvent, path: string): void
   /** AI status of a repository's sessions, and of a group (its folder's and its tabs' sessions) */
@@ -34,7 +36,7 @@ const AiDot = ({ state }: { state: AiState | null }) => (state ? <span className
  * colored chip. Only the group holding the active tab is expanded; the others show just their
  * chip. Tabs that don't fit live in the ▾ menu; the active tab is always visible.
  */
-export function TabBar({ tabs, active, workspaces, onSelect, onClose, onNew, onOpenGroup, onGroupMenu, onTabMenu, repoAi, groupAi }: Props) {
+export function TabBar({ tabs, active, workspaces, onSelect, onClose, onNew, onOpenGroup, onCollapseGroup, onGroupMenu, onTabMenu, repoAi, groupAi }: Props) {
   const ui = useUi()
   const runs = useRuns()
   const ref = useRef<HTMLDivElement>(null)
@@ -73,8 +75,8 @@ export function TabBar({ tabs, active, workspaces, onSelect, onClose, onNew, onO
         key={`g:${item.ws.id}`}
         className={`tab-group ${item.open ? 'open' : ''}`}
         style={{ '--group': `var(--lane-${item.ws.color})`, maxWidth: chipWidth(item.ws) } as React.CSSProperties}
-        title={`${item.ws.name}: ${item.ws.repos.length} tab${item.ws.repos.length === 1 ? '' : 's'}\n${item.ws.folder}${item.open ? '' : '\nClick to open this workspace'}`}
-        onClick={() => !item.open && onOpenGroup(item.ws)}
+        title={`${item.ws.name}: ${item.ws.repos.length} tab${item.ws.repos.length === 1 ? '' : 's'}\n${item.ws.folder}${item.open ? '\nClick to collapse' : '\nClick to open this workspace'}`}
+        onClick={() => (item.open ? onCollapseGroup(item.ws) : onOpenGroup(item.ws))}
         onContextMenu={(e) => {
           e.preventDefault()
           onGroupMenu(e, item.ws)
