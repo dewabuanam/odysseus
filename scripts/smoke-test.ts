@@ -13,6 +13,8 @@ import { HookService } from '../src/main/git/hooks'
 import { layoutGraph } from '../src/main/git/parsers'
 import { parseSearch } from '../src/shared/search'
 import { mergeResult, parseConflicts } from '../src/shared/conflicts'
+import { aggregateAi } from '../src/shared/types'
+import { detectAiState } from '../src/renderer/src/aiState'
 
 const settings: Settings = {
   extraPath: [],
@@ -494,6 +496,18 @@ async function main() {
     assert.ok(a.ok, a.stderr)
     assert.equal((await repo.status()).operation, null)
     assert.equal(sh(dir, 'rev-parse', 'HEAD').trim(), before)
+  })
+
+  await test('AI status: read from the screen, most urgent wins', async () => {
+    const quiet = Date.now() - 10_000
+    assert.equal(detectAiState('✶ Thinking… (12s · esc to interrupt)', quiet), 'working')
+    assert.equal(detectAiState('Do you want to proceed?\n❯ 1. Yes\n  2. No', quiet), 'waiting')
+    assert.equal(detectAiState('Enter to confirm · Esc to cancel', quiet), 'waiting')
+    assert.equal(detectAiState('> \n  ? for shortcuts', quiet), 'idle')
+    assert.equal(detectAiState('> \n  ? for shortcuts', Date.now()), 'working', 'fresh output counts as working')
+    assert.equal(aggregateAi(['idle', 'working', null]), 'working')
+    assert.equal(aggregateAi(['idle', 'waiting', 'working']), 'waiting')
+    assert.equal(aggregateAi([]), null)
   })
 
   await test('merge conflict: resolved block by block in the resolver, then a deleted side', async () => {

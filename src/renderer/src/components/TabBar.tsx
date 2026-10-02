@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
-import type { RepoSummary, Workspace } from '@shared/types'
+import type { AiState, RepoSummary, Workspace } from '@shared/types'
+import { AI_LABEL } from '../aiState'
 import { norm, useRuns } from '../runs'
 import { useUi } from '../ui'
 import { barItems, type BarItem } from '../workspaces'
 
 const TAB_W = 168
 const BUTTONS_W = 76
-const chipWidth = (w: Workspace) => Math.min(150, 26 + w.name.length * 7.2)
+const chipWidth = (w: Workspace) => Math.min(162, 38 + w.name.length * 7.2)
 
 interface Props {
   tabs: RepoSummary[]
@@ -21,14 +22,19 @@ interface Props {
   onOpenGroup(w: Workspace): void
   onGroupMenu(e: React.MouseEvent, w: Workspace): void
   onTabMenu(e: React.MouseEvent, path: string): void
+  /** AI status of a repository's sessions, and of a group (its folder's and its tabs' sessions) */
+  repoAi(path: string): AiState | null
+  groupAi(w: Workspace): AiState | null
 }
+
+const AiDot = ({ state }: { state: AiState | null }) => (state ? <span className={`ai-dot ai-${state}`} title={`AI ${AI_LABEL[state]}`} /> : null)
 
 /**
  * Repository tabs on their own row, grouped like browser tab groups: each workspace is a
  * colored chip. Only the group holding the active tab is expanded; the others show just their
  * chip. Tabs that don't fit live in the ▾ menu; the active tab is always visible.
  */
-export function TabBar({ tabs, active, workspaces, onSelect, onClose, onNew, onOpenGroup, onGroupMenu, onTabMenu }: Props) {
+export function TabBar({ tabs, active, workspaces, onSelect, onClose, onNew, onOpenGroup, onGroupMenu, onTabMenu, repoAi, groupAi }: Props) {
   const ui = useUi()
   const runs = useRuns()
   const ref = useRef<HTMLDivElement>(null)
@@ -77,6 +83,7 @@ export function TabBar({ tabs, active, workspaces, onSelect, onClose, onNew, onO
             }}
           >
             {!item.open && groupBusy(item.ws) && <span className="spinner tiny" />}
+            <AiDot state={groupAi(item.ws)} />
             <span className="ellipsis">{item.ws.name}</span>
           </div>
         ) : (
@@ -98,6 +105,7 @@ export function TabBar({ tabs, active, workspaces, onSelect, onClose, onNew, onO
             }}
           >
             {busy(item.tab.path) && <span className="spinner tiny" />}
+            <AiDot state={repoAi(item.tab.path)} />
             <span className="ellipsis grow">{item.tab.name}</span>
             <button
               className="tab-close"

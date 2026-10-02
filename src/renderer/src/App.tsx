@@ -10,6 +10,7 @@ import type {
   Settings,
   Workspace
 } from '@shared/types'
+import { aggregateAi, type AiState } from '@shared/types'
 import { api } from './api'
 import { ranked } from './commands'
 import { bindingsFor, KEYMAP_NAMES } from './keymaps'
@@ -49,6 +50,7 @@ function Shell() {
   const [appSettings, setAppSettings] = useState<Settings | null>(null)
   const [termOpen, setTermOpen] = useState(false)
   const [termUsed, setTermUsed] = useState(false)
+  const [aiStates, setAiStates] = useState<Record<string, AiState>>({})
   const termRef = useRef<TerminalHandle>(null)
   const handles = useRef(new Map<string, TabHandle>())
   const stateRef = useRef({ tabs, active, workspaces })
@@ -318,6 +320,14 @@ function Shell() {
   const scopes: TermScope[] = [...(activeWs ? [wsScope(activeWs)] : []), ...(activeRepo ? [repoScope(activeRepo)] : [])]
   const liveScopes = [...tabs.map((t) => repoScope(t).key), ...workspaces.map((w) => wsScope(w).key)]
 
+  // AI status dots: a tab shows its repository's sessions, a group chip its own and its tabs'.
+  const repoAi = (path: string) => aiStates[`repo:${norm(path)}`] ?? null
+  const groupAi = (w: Workspace) => aggregateAi([aiStates[`ws:${w.id}`], ...w.repos.map(repoAi)])
+  const overallAi = aggregateAi(Object.values(aiStates))
+  useEffect(() => {
+    api.setAiStatus(overallAi)
+  }, [overallAi])
+
   /** Shows the pane and starts a session: the given program, or the default AI. */
   const openTerminal = (profile?: { name: string; command: string }, w?: Workspace) => {
     if (w && !wsOf([w], stateRef.current.active)) openWorkspace(w)
@@ -563,6 +573,8 @@ function Shell() {
           onSelect={selectTab}
           onClose={closeTab}
           onOpenGroup={openWorkspace}
+          repoAi={repoAi}
+          groupAi={groupAi}
           onGroupMenu={groupMenu}
           onTabMenu={tabMenu}
           onNew={() => api.pickRepo().then((d) => { if (d) openRepo(d) })}
@@ -587,7 +599,7 @@ function Shell() {
         />
       ))}
       </div>
-      {termUsed && <TerminalPane ref={termRef} scopes={scopes} live={liveScopes} open={termOpen && !!activeTab} onClose={() => setTermOpen(false)} />}
+      {termUsed && <TerminalPane ref={termRef} scopes={scopes} live={liveScopes} onAiStates={setAiStates} open={termOpen && !!activeTab} onClose={() => setTermOpen(false)} />}
       </div>
 
       {palette && <Palette initial={palette} onClose={() => setPalette(null)} />}

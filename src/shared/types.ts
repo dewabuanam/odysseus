@@ -350,3 +350,15 @@ export interface RepoSummary {
   path: string
   name: string
 }
+
+/** What an AI session in the terminal pane is doing, read from its screen. */
+export type AiState = 'working' | 'waiting' | 'idle'
+
+const AI_RANK: Record<AiState, number> = { idle: 1, working: 2, waiting: 3 }
+
+/** The most urgent of several states: needs action, then working, then idle. */
+export function aggregateAi(states: (AiState | null | undefined)[]): AiState | null {
+  let out: AiState | null = null
+  for (const s of states) if (s && (!out || AI_RANK[s] > AI_RANK[out])) out = s
+  return out
+}

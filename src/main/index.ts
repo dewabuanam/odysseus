@@ -33,6 +33,7 @@ import type {
   PullOptions,
   RepoSummary,
   Settings,
+  AiState,
   StashOptions,
   TerminalProfile,
   Workspace
@@ -134,6 +135,50 @@ const terminals = new TerminalService({
     send('termExit', { id, code })
   }
 })
+
+// ------------------------------------------------------------------ AI status on the taskbar
+
+const AI_COLORS: Record<AiState, [number, number, number]> = { waiting: [217, 58, 50], working: [224, 164, 0], idle: [47, 154, 79] }
+const AI_TEXT: Record<AiState, string> = { waiting: 'AI needs your input', working: 'AI working', idle: 'AI idle' }
+let aiStatus: AiState | null = null
+
+/** A filled circle with a light ring, as a 16x16 BGRA bitmap for the taskbar overlay. */
+function dotIcon(state: AiState): Electron.NativeImage {
+  const size = 32
+  const [r, g, b] = AI_COLORS[state]
+  const buf = Buffer.alloc(size * size * 4)
+  const c = (size - 1) / 2
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const d = Math.hypot(x - c, y - c)
+      const i = (y * size + x) * 4
+      const inner = d <= 11.5
+      const ring = !inner && d <= 15
+      if (!inner && !ring) continue
+      const edge = Math.max(0, Math.min(1, 15.5 - d))
+      buf[i] = inner ? b : 255
+      buf[i + 1] = inner ? g : 255
+      buf[i + 2] = inner ? r : 255
+      buf[i + 3] = Math.round(255 * edge)
+    }
+  }
+  return nativeImage.createFromBitmap(buf, { width: size, height: size, scaleFactor: 2 })
+}
+
+/**
+ * Shows the most urgent AI state of every open session on the taskbar button: a red, yellow
+ * or green dot on Windows, a dock badge on macOS. Flashes the taskbar when an AI starts
+ * waiting for you while Odysseus is in the background.
+ */
+function setAiStatus(state: AiState | null): void {
+  if (!win || state === aiStatus) return
+  const prev = aiStatus
+  aiStatus = state
+  if (process.platform === 'win32') win.setOverlayIcon(state ? dotIcon(state) : null, state ? AI_TEXT[state] : '')
+  else if (process.platform === 'darwin') app.dock?.setBadge(state === 'waiting' ? '!' : state === 'working' ? '•' : '')
+  if (state === 'waiting' && prev !== 'waiting' && !win.isFocused()) win.flashFrame(true)
+  if (state !== 'waiting') win.flashFrame(false)
+}
 
 // ------------------------------------------------------------------ open repositories (tabs)
 
@@ -268,6 +313,7 @@ const appApi: Record<string, Handler> = {
   termWrite: (id: number, data: string) => terminals.write(id, data),
   termResize: (id: number, cols: number, rows: number) => terminals.resize(id, cols, rows),
   termKill: (id: number) => terminals.kill(id),
+  setAiStatus: (state: AiState | null) => setAiStatus(state),
   platform: () => process.platform,
   windowMinimize: () => win?.minimize(),
   windowToggleMaximize: () => (win?.isMaximized() ? win.unmaximize() : win?.maximize()),

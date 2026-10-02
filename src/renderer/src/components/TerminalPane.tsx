@@ -2,7 +2,8 @@ import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import type { Settings, TerminalProfile } from '@shared/types'
+import { aggregateAi, type AiState, type Settings, type TerminalProfile } from '@shared/types'
+import { AI_LABEL, detectAiState, visibleText } from '../aiState'
 import { api } from '../api'
 import { useUi } from '../ui'
 
@@ -28,6 +29,8 @@ interface Session {
   title: string
   profile: TerminalProfile
   exited: boolean
+  /** AI sessions only: what the program is doing */
+  ai: AiState | null
 }
 
 const SHELL: TerminalProfile = { name: 'Shell', command: '' }
@@ -53,6 +56,8 @@ interface Props {
   live: string[]
   open: boolean
   onClose(): void
+  /** Most urgent AI state per scope key, whenever any session's state changes */
+  onAiStates(states: Record<string, AiState>): void
   ref?: Ref<TerminalHandle>
 }
 
@@ -60,7 +65,7 @@ interface Props {
  * Right-hand pane with real terminals: a shell, or an AI CLI such as Claude Code, started in the
  * repository or its workspace folder. Sessions keep running while the pane is hidden.
  */
-export function TerminalPane({ scopes, live, open, onClose, ref }: Props) {
+export function TerminalPane({ scopes, live, open, onClose, onAiStates, ref }: Props) {
   const ui = useUi()
   const [sessions, setSessions] = useState<Session[]>([])
   const [activeBy, setActiveBy] = useState<Record<string, number>>({})
@@ -96,7 +101,7 @@ export function TerminalPane({ scopes, live, open, onClose, ref }: Props) {
     (profile: TerminalProfile, sc: TermScope | null = scope) => {
       if (!sc) return
       const key = nextKey++
-      setSessions((s) => [...s, { key, scope: sc.key, cwd: sc.cwd, title: profile.command ? profile.name : shellName, profile, exited: false }])
+      setSessions((s) => [...s, { key, scope: sc.key, cwd: sc.cwd, title: profile.command ? profile.name : shellName, profile, exited: false, ai: profile.command ? 'working' : null }])
       setActiveBy((a) => ({ ...a, [sc.key]: key }))
     },
     [scope, shellName]
@@ -124,7 +129,22 @@ export function TerminalPane({ scopes, live, open, onClose, ref }: Props) {
   }, [live.join('\0')])
 
   const close = (key: number) => setSessions((s) => s.filter((x) => x.key !== key))
-  const onExit = useCallback((key: number) => setSessions((s) => s.map((x) => (x.key === key ? { ...x, exited: true } : x))), [])
+  const onExit = useCallback((key: number) => setSessions((s) => s.map((x) => (x.key === key ? { ...x, exited: true, ai: null } : x))), [])
+  const onAi = useCallback((key: number, ai: AiState) => setSessions((s) => s.map((x) => (x.key === key && x.ai !== ai && !x.exited ? { ...x, ai } : x))), [])
+
+  // Report the most urgent state per scope (repository or workspace).
+  const aiKey = sessions.map((s) => `${s.scope}=${s.ai ?? ''}`).join('|')
+  const onAiStatesRef = useRef(onAiStates)
+  onAiStatesRef.current = onAiStates
+  useEffect(() => {
+    const out: Record<string, AiState> = {}
+    for (const s of sessions) {
+      const a = aggregateAi([out[s.scope], s.ai])
+      if (a) out[s.scope] = a
+    }
+    onAiStatesRef.current(out)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiKey])
 
   const profiles = settings?.terminalProfiles.filter((p) => p.command.trim()) ?? []
   const choices = [{ ...SHELL, name: shellName }, ...profiles]
@@ -192,6 +212,7 @@ export function TerminalPane({ scopes, live, open, onClose, ref }: Props) {
           <div className="term-tabs">
             {mine.map((s) => (
               <div key={s.key} className={`term-tab ${s.key === active ? 'active' : ''} ${s.exited ? 'exited' : ''}`} onClick={() => scope && setActiveBy((a) => ({ ...a, [scope.key]: s.key }))} title={`${s.profile.command || s.title} in ${s.cwd}`}>
+                {s.ai && <span className={`ai-dot ai-${s.ai}`} title={`${s.title}: ${AI_LABEL[s.ai]}`} />}
                 <span className="ellipsis">{s.title}</span>
                 <button className="term-x" onClick={(e) => { e.stopPropagation(); close(s.key) }} aria-label="Close session">×</button>
               </div>
@@ -200,7 +221,7 @@ export function TerminalPane({ scopes, live, open, onClose, ref }: Props) {
         )}
         <div className="term-body">
           {sessions.map((s) => (
-            <TermView key={s.key} cwd={s.cwd} profile={s.profile} visible={open && s.scope === scope?.key && s.key === active} onExit={() => onExit(s.key)} />
+            <TermView key={s.key} cwd={s.cwd} profile={s.profile} visible={open && s.scope === scope?.key && s.key === active} onExit={() => onExit(s.key)} onAi={s.profile.command ? (a) => onAi(s.key, a) : undefined} />
           ))}
           {mine.length === 0 && (
             <div className="term-empty">
@@ -221,11 +242,13 @@ export function TerminalPane({ scopes, live, open, onClose, ref }: Props) {
   )
 }
 
-function TermView({ cwd, profile, visible, onExit }: { cwd: string; profile: TerminalProfile; visible: boolean; onExit(): void }) {
+function TermView({ cwd, profile, visible, onExit, onAi }: { cwd: string; profile: TerminalProfile; visible: boolean; onExit(): void; onAi?(state: AiState): void }) {
   const host = useRef<HTMLDivElement>(null)
   const ref = useRef<{ term: Terminal; fit: FitAddon; id: number | null } | null>(null)
   const onExitRef = useRef(onExit)
   onExitRef.current = onExit
+  const onAiRef = useRef(onAi)
+  onAiRef.current = onAi
 
   useEffect(() => {
     const term = new Terminal({
@@ -243,6 +266,7 @@ function TermView({ cwd, profile, visible, onExit }: { cwd: string; profile: Ter
     ref.current = state
     let disposed = false
     let pending = ''
+    let lastOutputAt = Date.now()
 
     // Ctrl+C copies when text is selected; otherwise it interrupts like any terminal.
     term.attachCustomKeyEventHandler((e) => {
@@ -261,7 +285,10 @@ function TermView({ cwd, profile, visible, onExit }: { cwd: string; profile: Ter
     const off = window.ody.on((ch, payload) => {
       const p = payload as { id: number; data?: string; code?: number }
       if (p.id !== state.id) return
-      if (ch === 'termData') term.write(p.data!)
+      if (ch === 'termData') {
+        term.write(p.data!)
+        lastOutputAt = Date.now()
+      }
       else if (ch === 'termExit') {
         term.write(`\r\n\x1b[2m[process exited with code ${p.code}]\x1b[0m\r\n`)
         state.id = null
@@ -298,11 +325,16 @@ function TermView({ cwd, profile, visible, onExit }: { cwd: string; profile: Ter
       }
     })
     ro.observe(host.current!)
+    // AI sessions: read the screen a few times a second to tell working / needs you / idle.
+    const watch = setInterval(() => {
+      if (onAiRef.current && state.id !== null) onAiRef.current(detectAiState(visibleText(term), lastOutputAt))
+    }, 600)
     const mo = new MutationObserver(() => (term.options.theme = xtermTheme()))
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 
     return () => {
       disposed = true
+      clearInterval(watch)
       ro.disconnect()
       mo.disconnect()
       off()

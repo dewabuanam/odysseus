@@ -508,3 +508,11 @@ select.input option, select option { background: var(--paper); color: var(--ink)
 .term-scope button.on { background: var(--ink); color: var(--paper); }
 .term-cwd { font-family: var(--hand); font-size: 15px; max-width: 160px; }
 .term-pane > .term-tabs { flex: 0 0 auto; padding: 3px 6px; border-bottom: 1px dashed var(--line); }
+
+/* ---------- AI status dots: red needs you, yellow working, green idle */
+:root { --ai-waiting: #d93a32; --ai-working: #e0a400; --ai-idle: #2f9a4f; }
+.ai-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 1.5px var(--paper); }
+.ai-dot.ai-waiting { background: var(--ai-waiting); animation: ai-pulse 1s ease-in-out infinite; }
+.ai-dot.ai-working { background: var(--ai-working); animation: ai-pulse 1.6s ease-in-out infinite; }
+.ai-dot.ai-idle { background: var(--ai-idle); }
+@keyframes ai-pulse { 50% { opacity: 0.35; } }
