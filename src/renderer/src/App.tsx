@@ -10,7 +10,7 @@ import type {
   Settings,
   Workspace
 } from '@shared/types'
-import { aggregateAi, type AiState } from '@shared/types'
+import { aggregateAi, type AiCommand, type AiState } from '@shared/types'
 import { api } from './api'
 import { ranked } from './commands'
 import { bindingsFor, KEYMAP_NAMES } from './keymaps'
@@ -24,7 +24,7 @@ import { AboutDialog, HOMEPAGE } from './components/AboutDialog'
 import { TabBar } from './components/TabBar'
 import { TitleBar } from './components/TitleBar'
 import { Welcome } from './components/Welcome'
-import { defaultProfile, TerminalPane, type TerminalHandle, type TermScope } from './components/TerminalPane'
+import { defaultProfile, hasRemote, TerminalPane, type TerminalHandle, type TermScope } from './components/TerminalPane'
 import { addRepos, commonFolder, newId, nextColor, prune, withoutRepos, wsOf, LANE_COUNT } from './workspaces'
 
 const AI_BADGE: Record<AiState, string> = { waiting: '#d93a32', working: '#e0a400', idle: '#2f9a4f' }
@@ -59,6 +59,17 @@ function aiBadge(state: AiState, working: number): string {
 
 const COLOR_NAMES = ['Red', 'Blue', 'Green', 'Orange', 'Purple', 'Teal', 'Brown', 'Pink']
 
+/** "Claude Code" reads as "Claude" in command titles. */
+const aiShortName = (name: string) => name.replace(/\s+(code|cli)$/i, '')
+
+/** `pr:pr-review` reads as "Pr Review", `commit` as "Commit". */
+const commandTitle = (name: string) =>
+  (name.split(':').pop() ?? name)
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((w) => w[0].toUpperCase() + w.slice(1))
+    .join(' ')
+
 export function App() {
   return (
     <UiProvider>
@@ -85,6 +96,8 @@ function Shell() {
   const [termUsed, setTermUsed] = useState(true)
   const [aiStates, setAiStates] = useState<Record<string, AiState>>({})
   const [aiWorking, setAiWorking] = useState(0)
+  /** Slash commands the default AI offers where the AI pane opens */
+  const [aiCmds, setAiCmds] = useState<AiCommand[]>([])
   const termRef = useRef<TerminalHandle>(null)
   const handles = useRef(new Map<string, TabHandle>())
   const stateRef = useRef({ tabs, active, workspaces })
@@ -377,6 +390,44 @@ function Shell() {
     setTimeout(() => withPane((h) => h.start(profile, w ? 'workspace' : undefined)), 30)
   }
 
+  /** Shows the pane and types `text` into the default AI, starting it when none is running. */
+  const sendToAi = (text: string) => {
+    setTermUsed(true)
+    setTermOpen(true)
+    setTimeout(() => withPane((h) => h.send(text)), 30)
+  }
+
+  const aiProfile = appSettings ? defaultProfile(appSettings) : null
+  const aiCwd = scopes[0]?.cwd ?? ''
+  useEffect(() => {
+    if (!aiProfile?.command.trim() || !aiCwd) return setAiCmds([])
+    let live = true
+    api.aiCommands(aiProfile.command, aiCwd).then((c) => live && setAiCmds(c), () => live && setAiCmds([]))
+    return () => {
+      live = false
+    }
+  }, [aiProfile?.command, aiCwd])
+
+  /** "Claude: Commit" types `/commit`, plus whatever you add after it, into the default AI. */
+  const aiSlashCommands = (): Cmd[] => {
+    if (!aiProfile?.command.trim()) return []
+    const ai = aiShortName(aiProfile.name)
+    return aiCmds.map((c) => ({
+      id: `ai.cmd.${c.name}`,
+      title: `${ai}: ${commandTitle(c.name)}`,
+      detail: c.description ? `${c.description}${c.source === 'built-in' ? '' : ` (${c.source})`}` : c.source,
+      cmdline: `/${c.name}`,
+      when: !!stateRef.current.active,
+      run: () => ({
+        kind: 'input',
+        title: `${ai} /${c.name}`,
+        placeholder: `Text after /${c.name} (optional), Enter to send to ${ai}`,
+        allowEmpty: true,
+        submit: (v: string) => sendToAi(`/${c.name}${v.trim() ? ` ${v.trim()}` : ''}`)
+      })
+    }))
+  }
+
   const toggleTerminal = () => {
     if (termOpen) return setTermOpen(false)
     setTermUsed(true)
@@ -407,6 +458,14 @@ function Shell() {
     ...(appSettings?.terminalProfiles ?? [])
       .filter((p) => p.command.trim())
       .map((p) => ({ id: `ai.profile.${p.name}`, title: `AI: Open ${p.name}`, cmdline: p.command, when: !!stateRef.current.active, run: () => openTerminal(p) })),
+    {
+      id: 'ai.remote',
+      title: `AI: Turn Remote Control ${appSettings?.remoteControl ? 'Off' : 'On'}`,
+      detail: 'continue Claude Code sessions from claude.ai or the Claude app',
+      when: !!aiProfile && hasRemote(aiProfile),
+      run: () => withPane((h) => h.toggleRemote())
+    },
+    ...aiSlashCommands(),
     { id: 'term.shell', title: 'Terminal: New Shell', when: !!stateRef.current.active, run: () => openTerminal({ name: 'Shell', command: '' }) },
     { id: 'view.terminal', title: 'View: Toggle AI / Terminal Pane', when: !!stateRef.current.active, run: () => toggleTerminal() },
     {
@@ -650,7 +709,7 @@ function Shell() {
       {termUsed && <TerminalPane ref={termRef} scopes={scopes} live={liveScopes} onAiStates={(s, n) => {
             setAiStates(s)
             setAiWorking(n)
-          }} open={termOpen && !!activeTab} onClose={() => setTermOpen(false)} />}
+          }} appSettings={appSettings} onSettings={setAppSettings} open={termOpen && !!activeTab} onClose={() => setTermOpen(false)} />}
       </div>
 
       {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}

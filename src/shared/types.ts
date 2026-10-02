@@ -314,6 +314,10 @@ export interface Settings {
   terminalDefault: string
   /** Start the default AI in the background so opening it is instant */
   terminalPrewarm: boolean
+  /** Start every Claude Code session with Remote Control, so it can be continued from claude.ai or the Claude app */
+  remoteControl: boolean
+  /** The Remote Control introduction has been shown */
+  remoteControlSetup: boolean
 }
 
 /** A program the terminal pane can start, run inside the configured shell. */
@@ -323,6 +327,21 @@ export interface TerminalProfile {
   command: string
   /** Shell command that installs the program, run first when it isn't on PATH */
   install?: string
+}
+
+/** A slash command an AI CLI offers: a built-in, a skill or a custom command. */
+export interface AiCommand {
+  /** Without the slash, e.g. `commit` or `pr:pr-review` */
+  name: string
+  description?: string
+  /** Where it comes from: built-in, project, personal, or the plugin's name */
+  source: string
+}
+
+/** The program a profile command runs, e.g. `claude` for `claude --model opus`. */
+export function programOf(command: string): string {
+  const first = (command.trim().split(/\s+/)[0] ?? '').replace(/^["']|["']$/g, '')
+  return (first.split(/[\\/]/).pop() ?? '').toLowerCase().replace(/\.(exe|cmd|ps1|bat)$/, '')
 }
 
 /** A group of repository tabs, like a browser tab group, with a folder its terminals open in. */

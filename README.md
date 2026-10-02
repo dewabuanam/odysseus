@@ -109,6 +109,10 @@ Group tabs into **workspaces**, like browser tab groups. Each workspace is a col
 
 The **Claude Code** button in the title bar (or **AI: Open** in the palette, or Ctrl+Shift+T) opens a pane on the right with your AI coding tool running in the current repository, or in the workspace folder when the tab belongs to a workspace (switch with **Workspace / Repository**). Sessions are real terminals and keep running while the pane is hidden. Start more from the pane: your default AI, Codex, Gemini, Copilot, or a plain PowerShell. The default AI, the shell and the list of programs are in **Settings > Terminal pane** and **Preferences: Default AI** in the palette. A program that isn't installed yet is installed with its official command the first time you start it.
 
+**AI commands in the palette.** The default AI's slash commands are palette commands named after it: built-ins, your skills and custom commands, the project's, and installed plugins'. *Claude: Commit* types `/commit` into the session in view (starting one if needed); press Enter to add text after it first. The text waits until the AI is ready at its prompt.
+
+**Remote Control.** The **Remote** button in the AI pane (or **AI: Turn Remote Control On/Off**, or Settings) lets you continue Claude Code sessions from claude.ai or the Claude app. The first time, a window explains it and asks whether every AI session you open should start with it. Sessions already open get it right away and show a *remote* badge. It needs a claude.ai login on a Pro, Max, Team or Enterprise plan.
+
 ### Context menus
 
 ![Commit context menu](docs/screenshots/menu.png)

@@ -2,10 +2,11 @@ import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { aggregateAi, type AiState, type Settings, type TerminalProfile } from '@shared/types'
+import { aggregateAi, programOf, type AiState, type Settings, type TerminalProfile } from '@shared/types'
 import { AI_LABEL, detectAiState, visibleText } from '../aiState'
 import { api } from '../api'
 import { useUi } from '../ui'
+import { RemoteControlDialog } from './RemoteControlDialog'
 
 /** Where sessions run: a repository, or a workspace's folder. */
 export interface TermScope {
@@ -20,6 +21,10 @@ export interface TerminalHandle {
   start(profile?: TerminalProfile, kind?: TermScope['kind']): void
   /** Start the default program when the current scope has no sessions yet. */
   ensure(): void
+  /** Types `text` into the default AI here (starting it if needed) once it is ready for input. */
+  send(text: string): void
+  /** Turns Remote Control on or off, introducing it the first time. */
+  toggleRemote(): void
 }
 
 interface Session {
@@ -33,6 +38,8 @@ interface Session {
   ai: AiState | null
   /** Started ahead of time in the background; becomes a real session when the AI is opened */
   spare?: boolean
+  /** Claude Code with Remote Control on */
+  remote?: boolean
 }
 
 const SHELL: TerminalProfile = { name: 'Shell', command: '' }
@@ -51,6 +58,19 @@ export function defaultProfile(s: Settings): TerminalProfile {
   return s.terminalProfiles.find((p) => p.name === s.terminalDefault) ?? SHELL
 }
 
+/** Only Claude Code has Remote Control. */
+export const hasRemote = (p: TerminalProfile) => programOf(p.command) === 'claude'
+
+/** The name a remote session shows in the Claude session list: the repository or workspace. */
+const remoteName = (label: string) => label.replace(/[^\w .-]/g, '').trim()
+
+/** The profile as started in `label`: with `--remote-control` when that's on and it's Claude Code. */
+function withRemote(p: TerminalProfile, on: boolean, label: string): TerminalProfile {
+  if (!on || !hasRemote(p) || /\s--(remote-control|rc)\b/.test(p.command)) return p
+  const name = remoteName(label)
+  return { ...p, command: `${p.command.trim()} --remote-control${name ? ` "${name}"` : ''}` }
+}
+
 interface Props {
   /** Scopes available for the active tab: its workspace (if any) first, then the repository */
   scopes: TermScope[]
@@ -60,6 +80,10 @@ interface Props {
   onClose(): void
   /** Most urgent AI state per scope key, and how many sessions are working, on every change */
   onAiStates(states: Record<string, AiState>, working: number): void
+  /** Settings as the app last saw them; a change reloads the pane's copy */
+  appSettings?: Settings | null
+  /** The pane changed a setting (Remote Control) */
+  onSettings?(s: Settings): void
   ref?: Ref<TerminalHandle>
 }
 
@@ -67,13 +91,16 @@ interface Props {
  * Right-hand pane with real terminals: a shell, or an AI CLI such as Claude Code, started in the
  * repository or its workspace folder. Sessions keep running while the pane is hidden.
  */
-export function TerminalPane({ scopes, live, open, onClose, onAiStates, ref }: Props) {
+export function TerminalPane({ scopes, live, open, onClose, onAiStates, appSettings, onSettings, ref }: Props) {
   const ui = useUi()
   const [sessions, setSessions] = useState<Session[]>([])
   const [activeBy, setActiveBy] = useState<Record<string, number>>({})
   const [settings, setSettings] = useState<Settings | null>(null)
   const [shellName, setShellName] = useState('Shell')
   const [preferRepo, setPreferRepo] = useState(false)
+  const [remoteIntro, setRemoteIntro] = useState(false)
+  /** Text waiting to be typed into a session once it is ready for input, by session key */
+  const outbox = useRef(new Map<number, string[]>())
   const [width, setWidth] = useState(() => {
     try {
       return Number(localStorage.getItem('odysseus.terminal.width')) || 560
@@ -97,29 +124,66 @@ export function TerminalPane({ scopes, live, open, onClose, onAiStates, ref }: P
 
   useEffect(() => {
     loadSettings()
-  }, [open, loadSettings])
+  }, [open, appSettings, loadSettings])
 
+  const remoteOn = settings?.remoteControl === true
   const start = useCallback(
-    (profile: TerminalProfile, sc: TermScope | null = scope) => {
+    (base: TerminalProfile, sc: TermScope | null = scope): number | undefined => {
       if (!sc) return
+      const profile = withRemote(base, remoteOn, sc.label)
       // An AI started ahead of time for this place opens instantly instead of booting now.
       const spare = sessions.find((x) => x.spare && !x.exited && x.scope === sc.key && x.profile.name === profile.name && x.profile.command === profile.command)
       if (spare) {
         setSessions((s) => s.map((x) => (x.key === spare.key ? { ...x, spare: false } : x)))
         setActiveBy((a) => ({ ...a, [sc.key]: spare.key }))
-        return
+        return spare.key
       }
       const key = nextKey++
-      setSessions((s) => [...s, { key, scope: sc.key, cwd: sc.cwd, title: profile.command ? profile.name : shellName, profile, exited: false, ai: profile.command ? 'working' : null }])
+      const remote = profile !== base
+      setSessions((s) => [...s, { key, scope: sc.key, cwd: sc.cwd, title: profile.command ? base.name : shellName, profile, exited: false, ai: profile.command ? 'working' : null, remote }])
       setActiveBy((a) => ({ ...a, [sc.key]: key }))
+      return key
     },
-    [scope, shellName, sessions]
+    [scope, shellName, sessions, remoteOn]
   )
+
+  const queue = (key: number, text: string) => outbox.current.set(key, [...(outbox.current.get(key) ?? []), text])
+
+  /**
+   * Saves the Remote Control setting and turns it on in the Claude Code sessions already open,
+   * by typing /remote-control into each once it is ready for input.
+   */
+  const enableRemote = async (everySession: boolean) => {
+    setRemoteIntro(false)
+    const saved = await api.setSettings({ remoteControl: everySession, remoteControlSetup: true })
+    setSettings(saved)
+    onSettings?.(saved)
+    const targets = sessions.filter((x) => !x.spare && !x.exited && !x.remote && hasRemote(x.profile))
+    for (const t of targets) {
+      const name = remoteName(scopes.find((x) => x.key === t.scope)?.label ?? t.cwd.split(/[\\/]/).filter(Boolean).pop() ?? '')
+      queue(t.key, `/remote-control${name ? ` ${name}` : ''}`)
+    }
+    if (targets.length) setSessions((s) => s.map((x) => (targets.some((t) => t.key === x.key) ? { ...x, remote: true } : x)))
+    const n = targets.length
+    const sessionsText = n ? `${n} open session${n > 1 ? 's' : ''}` : ''
+    ui.toast(everySession ? `Remote Control is on${n ? ` (also for ${sessionsText})` : ''}` : n ? `Remote Control is on for ${sessionsText}` : 'No Claude Code session is open yet')
+  }
+
+  const toggleRemote = async () => {
+    const s = await loadSettings()
+    if (!s.remoteControlSetup) return setRemoteIntro(true)
+    if (!s.remoteControl) return enableRemote(true)
+    const saved = await api.setSettings({ remoteControl: false })
+    setSettings(saved)
+    onSettings?.(saved)
+    const kept = sessions.some((x) => !x.spare && !x.exited && x.remote)
+    ui.toast(kept ? 'Remote Control is off for new sessions. Open sessions keep it until you close them.' : 'Remote Control is off')
+  }
 
   // AI CLIs take seconds to boot (Claude Code about 4 to 5). Keep one copy of the default AI
   // starting in the background for the repository or workspace in view, so opening it is
   // instant. Only one spare exists at a time; moving elsewhere replaces it.
-  const prewarm = settings?.terminalPrewarm !== false && settings ? defaultProfile(settings) : null
+  const prewarm = settings?.terminalPrewarm !== false && settings && scope ? withRemote(defaultProfile(settings), remoteOn, scope.label) : null
   useEffect(() => {
     if (!scope || !prewarm?.command.trim()) {
       setSessions((s) => (s.some((x) => x.spare) ? s.filter((x) => !x.spare) : s))
@@ -130,13 +194,13 @@ export function TerminalPane({ scopes, live, open, onClose, onAiStates, ref }: P
         const keep = s.filter((x) => !x.spare || (x.scope === scope.key && x.profile.command === prewarm.command && !x.exited))
         const busy = keep.some((x) => x.scope === scope.key)
         if (busy) return keep.length === s.length ? s : keep
-        return [...keep, { key: nextKey++, scope: scope.key, cwd: scope.cwd, title: prewarm.name, profile: prewarm, exited: false, ai: null, spare: true }]
+        return [...keep, { key: nextKey++, scope: scope.key, cwd: scope.cwd, title: prewarm.name, profile: prewarm, exited: false, ai: null, spare: true, remote: remoteOn && hasRemote(prewarm) }]
       })
     }, 2500)
     return () => clearTimeout(t)
   }, [scope?.key, scope?.cwd, prewarm?.name, prewarm?.command])
-  const live$ = useRef({ start, scopes, scope, mine })
-  live$.current = { start, scopes, scope, mine }
+  const live$ = useRef({ start, scopes, scope, mine, active, toggleRemote })
+  live$.current = { start, scopes, scope, mine, active, toggleRemote }
 
   useImperativeHandle(ref, () => ({
     start: async (profile, kind) => {
@@ -149,7 +213,20 @@ export function TerminalPane({ scopes, live, open, onClose, onAiStates, ref }: P
     ensure: async () => {
       const s = await loadSettings()
       if (!live$.current.mine.length) live$.current.start(defaultProfile(s))
-    }
+    },
+    send: async (text) => {
+      const p = defaultProfile(await loadSettings())
+      if (!p.command.trim()) return void ui.toast('Pick a default AI first (Preferences: Default AI)', true)
+      const { start: go, scope: cur, mine: here, active: act } = live$.current
+      if (!cur) return
+      // The AI in view if it runs the default program, else the newest one here, else a new one.
+      const same = here.filter((x) => !x.exited && programOf(x.profile.command) === programOf(p.command))
+      const target = same.find((x) => x.key === act) ?? same[same.length - 1]
+      if (target) setActiveBy((a) => ({ ...a, [cur.key]: target.key }))
+      const key = target?.key ?? go(p, cur)
+      if (key !== undefined) queue(key, text)
+    },
+    toggleRemote: () => live$.current.toggleRemote()
   }), [loadSettings])
 
   // Sessions of a closed tab or workspace end with it.
@@ -157,7 +234,10 @@ export function TerminalPane({ scopes, live, open, onClose, onAiStates, ref }: P
     setSessions((s) => (s.some((x) => !live.includes(x.scope)) ? s.filter((x) => live.includes(x.scope)) : s))
   }, [live.join('\0')])
 
-  const close = (key: number) => setSessions((s) => s.filter((x) => x.key !== key))
+  const close = (key: number) => {
+    outbox.current.delete(key)
+    setSessions((s) => s.filter((x) => x.key !== key))
+  }
   const onExit = useCallback((key: number) => setSessions((s) => s.map((x) => (x.key === key ? { ...x, exited: true, ai: null } : x))), [])
   const onAi = useCallback((key: number, ai: AiState) => setSessions((s) => s.map((x) => (x.key === key && x.ai !== ai && !x.exited ? { ...x, ai } : x))), [])
 
@@ -220,6 +300,16 @@ export function TerminalPane({ scopes, live, open, onClose, onAiStates, ref }: P
             scope && <span className="term-cwd ellipsis" title={scope.cwd}>{scope.label}</span>
           )}
           <span className="grow" />
+          {settings && (hasRemote(defaultProfile(settings)) || mine.some((x) => hasRemote(x.profile))) && (
+            <button
+              className={`btn small remote-toggle ${remoteOn ? 'on' : ''}`}
+              onClick={() => toggleRemote()}
+              title={remoteOn ? 'Remote Control is on: Claude Code sessions can be continued from claude.ai or the Claude app. Click to turn it off.' : 'Remote Control is off. Click to continue Claude Code sessions from claude.ai or the Claude app.'}
+            >
+              <span className="remote-dot" />
+              Remote
+            </button>
+          )}
           {settings && (
             <button className="btn small" disabled={!scope} onClick={() => start(defaultProfile(settings))} title={`Start ${defaultProfile(settings).name} in ${scope?.cwd ?? ''}`}>
               + {defaultProfile(settings).name}
@@ -244,6 +334,7 @@ export function TerminalPane({ scopes, live, open, onClose, onAiStates, ref }: P
               <div key={s.key} className={`term-tab ${s.key === active ? 'active' : ''} ${s.exited ? 'exited' : ''}`} onClick={() => scope && setActiveBy((a) => ({ ...a, [scope.key]: s.key }))} title={`${s.profile.command || s.title} in ${s.cwd}`}>
                 {s.ai && <span className={`ai-dot ai-${s.ai}`} title={`${s.title}: ${AI_LABEL[s.ai]}`} />}
                 <span className="ellipsis">{s.title}</span>
+                {s.remote && !s.exited && <span className="term-remote" title="Remote Control is on: continue this session from claude.ai or the Claude app">remote</span>}
                 <button className="term-x" onClick={(e) => { e.stopPropagation(); close(s.key) }} aria-label="Close session">×</button>
               </div>
             ))}
@@ -251,7 +342,7 @@ export function TerminalPane({ scopes, live, open, onClose, onAiStates, ref }: P
         )}
         <div className="term-body">
           {sessions.map((s) => (
-            <TermView key={s.key} cwd={s.cwd} profile={s.profile} visible={open && s.scope === scope?.key && s.key === active} onExit={() => onExit(s.key)} onAi={s.profile.command ? (a) => onAi(s.key, a) : undefined} />
+            <TermView key={s.key} cwd={s.cwd} profile={s.profile} visible={open && s.scope === scope?.key && s.key === active} onExit={() => onExit(s.key)} onAi={s.profile.command ? (a) => onAi(s.key, a) : undefined} pull={() => outbox.current.get(s.key)?.shift()} />
           ))}
           {mine.length === 0 && (
             <div className="term-empty">
@@ -268,17 +359,30 @@ export function TerminalPane({ scopes, live, open, onClose, onAiStates, ref }: P
           )}
         </div>
       </div>
+      {remoteIntro && <RemoteControlDialog onClose={() => setRemoteIntro(false)} onEnable={enableRemote} />}
     </>
   )
 }
 
-function TermView({ cwd, profile, visible, onExit, onAi }: { cwd: string; profile: TerminalProfile; visible: boolean; onExit(): void; onAi?(state: AiState): void }) {
+interface TermViewProps {
+  cwd: string
+  profile: TerminalProfile
+  visible: boolean
+  onExit(): void
+  onAi?(state: AiState): void
+  /** Next text to type in once the program is ready for input */
+  pull?(): string | undefined
+}
+
+function TermView({ cwd, profile, visible, onExit, onAi, pull }: TermViewProps) {
   const host = useRef<HTMLDivElement>(null)
   const ref = useRef<{ term: Terminal; fit: FitAddon; id: number | null } | null>(null)
   const onExitRef = useRef(onExit)
   onExitRef.current = onExit
   const onAiRef = useRef(onAi)
   onAiRef.current = onAi
+  const pullRef = useRef(pull)
+  pullRef.current = pull
 
   useEffect(() => {
     const term = new Terminal({
@@ -356,8 +460,20 @@ function TermView({ cwd, profile, visible, onExit, onAi }: { cwd: string; profil
     })
     ro.observe(host.current!)
     // AI sessions: read the screen a few times a second to tell working / needs you / idle.
+    // Queued text (a slash command from the palette) is typed in once the AI sits idle at its
+    // prompt, so it isn't lost while the program boots or asks something first.
     const watch = setInterval(() => {
-      if (onAiRef.current && state.id !== null) onAiRef.current(detectAiState(visibleText(term), lastOutputAt))
+      if (!onAiRef.current || state.id === null) return
+      const ai = detectAiState(visibleText(term), lastOutputAt)
+      onAiRef.current(ai)
+      const text = ai === 'idle' ? pullRef.current?.() : undefined
+      if (text) {
+        const id = state.id
+        api.termWrite(id, text)
+        // Enter on its own, so the CLI doesn't take it as part of pasted text.
+        setTimeout(() => state.id === id && api.termWrite(id, '\r'), 150)
+        lastOutputAt = Date.now()
+      }
     }, 600)
     const mo = new MutationObserver(() => (term.options.theme = xtermTheme()))
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })

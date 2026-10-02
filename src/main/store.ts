@@ -33,7 +33,9 @@ const DEFAULTS: StoreData = {
       { name: 'Copilot', command: 'copilot' }
     ],
     terminalDefault: 'Claude Code',
-    terminalPrewarm: true
+    terminalPrewarm: true,
+    remoteControl: false,
+    remoteControlSetup: false
   },
   recentRepos: [],
   lastRepo: null,

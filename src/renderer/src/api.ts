@@ -25,6 +25,7 @@ import type {
   Submodule,
   Tag,
   TerminalProfile,
+  AiCommand,
   AiState,
   WorkingStatus,
   Workspace
@@ -70,6 +71,7 @@ export const api = {
   termWrite: (id: number, data: string) => call<void>('termWrite', id, data),
   termResize: (id: number, cols: number, rows: number) => call<void>('termResize', id, cols, rows),
   termKill: (id: number) => call<void>('termKill', id),
+  aiCommands: (command: string, cwd: string) => call<AiCommand[]>('aiCommands', command, cwd),
   setAiStatus: (state: AiState | null, badge: string | null) => call<void>('setAiStatus', state, badge),
   platform: () => call<string>('platform'),
   windowMinimize: () => call<void>('windowMinimize'),

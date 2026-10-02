@@ -6,6 +6,7 @@ import { GitRepo, type DiffSource } from './git/repo'
 import { HookService } from './git/hooks'
 import { GitRunner } from './git/runner'
 import { TerminalService } from './terminal'
+import { aiCommands } from './aiCommands'
 import {
   addHistory,
   addRecent,
@@ -326,6 +327,7 @@ const appApi: Record<string, Handler> = {
   termWrite: (id: number, data: string) => terminals.write(id, data),
   termResize: (id: number, cols: number, rows: number) => terminals.resize(id, cols, rows),
   termKill: (id: number) => terminals.kill(id),
+  aiCommands: (command: string, cwd: string) => aiCommands(command, cwd),
   setAiStatus: (state: AiState | null, badge?: string | null) => setAiStatus(state, badge),
   platform: () => process.platform,
   windowMinimize: () => win?.minimize(),
