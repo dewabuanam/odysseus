@@ -525,3 +525,22 @@ select.input option, select option { background: var(--paper); color: var(--ink)
 .ai-dot.ai-working { background: var(--ai-working); animation: ai-pulse 1.6s ease-in-out infinite; }
 .ai-dot.ai-idle { background: var(--ai-idle); }
 @keyframes ai-pulse { 50% { opacity: 0.35; } }
+
+/* While a dialog or the palette is open, the title bar stops being a window drag region:
+   drag regions swallow clicks, so clicking the header wouldn't close the dialog. */
+body:has(.overlay, .palette-overlay) .titlebar,
+body:has(.overlay, .palette-overlay) .titlebar * { -webkit-app-region: no-drag; }
+
+/* ---------- colored diffs: green for added lines, red for removed ones */
+:root { --diff-add-bg: rgba(47, 154, 79, 0.16); --diff-add-ink: #237a3d; --diff-del-bg: rgba(217, 58, 50, 0.13); --diff-del-ink: #b3302a; }
+:root[data-theme='dark'] { --diff-add-bg: rgba(87, 200, 120, 0.16); --diff-add-ink: #7fd99a; --diff-del-bg: rgba(240, 110, 100, 0.15); --diff-del-ink: #f39a92; }
+.dl.add { background: var(--diff-add-bg); }
+.dl.add .code::before { color: var(--diff-add-ink); }
+.dl.add .no { color: var(--diff-add-ink); opacity: 0.8; }
+.dl.del { background: var(--diff-del-bg); background-image: none; color: var(--ink); }
+.dl.del .code::before { color: var(--diff-del-ink); }
+.dl.del .no { color: var(--diff-del-ink); opacity: 0.8; }
+.st.st-A, .st.st-N, .st[class~='st-?'] { background: var(--diff-add-ink); color: var(--paper); border-color: var(--diff-add-ink); }
+.st.st-D { color: var(--diff-del-ink); border-color: var(--diff-del-ink); }
+.st.st-M, .st.st-R { color: var(--ai-working); border-color: var(--ai-working); }
+.sb-item .branch-mark { margin: -4px 0; flex-shrink: 0; }

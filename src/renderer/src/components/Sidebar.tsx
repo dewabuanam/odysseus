@@ -71,7 +71,7 @@ export function Sidebar({ selected, view, onSelectWorking, onShowHooks }: Props)
             onContextMenu={(e) => branchMenu(e, b)}
             title={`${b.upstream ? `tracking ${b.upstream}` : 'no upstream'}${isHidden(b) ? ' (hidden from graph)' : ''}`}
           >
-            <span>{b.current ? '●' : '○'}</span>
+            <BranchMark lane={repo.laneColors.get(b.sha)} current={b.current} dotted={b.current && changes > 0} />
             <span className="ellipsis">{b.name}</span>
             {(b.ahead || b.behind) ? (
               <span className="ab">
@@ -89,7 +89,7 @@ export function Sidebar({ selected, view, onSelectWorking, onShowHooks }: Props)
           <Section key={r.name} title={`Remote: ${r.name}`} count={rb.length} defaultOpen={false}>
             {rb.map((b) => (
               <div key={b.fullRef} className={`sb-item ${isHidden(b) ? 'hidden-ref' : ''}`} onClick={() => repo.select(b.sha)} onContextMenu={(e) => branchMenu(e, b)} onDoubleClick={() => repo.exec(() => api.checkoutRemote(b.name))}>
-                <span className="faint">⎇</span>
+                <BranchMark lane={repo.laneColors.get(b.sha)} />
                 <span className="ellipsis">{b.name.slice(r.name.length + 1)}</span>
               </div>
             ))}
@@ -216,5 +216,21 @@ function SubmoduleSection() {
         )
       })}
     </Section>
+  )
+}
+
+/**
+ * A branch's line in the graph, in miniature: its lane color, a filled node for the checked-out
+ * branch, dotted while it has uncommitted changes (like the line from "Uncommitted changes" in
+ * the graph). Branches whose tip isn't in the loaded graph get a grey dotted line.
+ */
+function BranchMark({ lane, current = false, dotted = false }: { lane?: number; current?: boolean; dotted?: boolean }) {
+  const color = lane === undefined ? 'var(--ink-3)' : `var(--lane-${lane})`
+  const dash = dotted || lane === undefined ? '2.5 2' : undefined
+  return (
+    <svg width="14" height="22" viewBox="0 0 14 22" className="branch-mark" aria-hidden>
+      <line x1="7" y1="0" x2="7" y2="22" stroke={color} strokeWidth="2" strokeDasharray={dash} opacity={0.85} />
+      <circle cx="7" cy="11" r={current ? 4 : 3.4} fill={current ? color : 'var(--paper-2)'} stroke={color} strokeWidth="1.8" />
+    </svg>
   )
 }

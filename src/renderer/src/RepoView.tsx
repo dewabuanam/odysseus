@@ -404,6 +404,15 @@ export function RepoView({ tab, active, openRepo, closeTab, openPalette, openSet
     return () => register(tab.path, null)
   }, [register, tab.path])
 
+  const laneColors = useMemo(() => {
+    const m = new Map<string, number>()
+    log.commits.forEach((c, i) => {
+      const g = log.graph[i]
+      if (g) m.set(c.sha, g.color)
+    })
+    return m
+  }, [log])
+
   const ctx: RepoCtx = useMemo(
     () => ({
       root: tab.path,
@@ -416,6 +425,7 @@ export function RepoView({ tab, active, openRepo, closeTab, openPalette, openSet
       submodules,
       superproject,
       hidden,
+      laneColors,
       openRepo,
       refresh,
       exec,
@@ -426,7 +436,7 @@ export function RepoView({ tab, active, openRepo, closeTab, openPalette, openSet
       openPalette,
       resolveConflicts
     }),
-    [tab.path, status, branches, tags, stashes, remotes, hooks, submodules, superproject, hidden, openRepo, refresh, exec, mutate, select, ui, openPalette, resolveConflicts]
+    [tab.path, status, branches, tags, stashes, remotes, hooks, submodules, superproject, hidden, laneColors, openRepo, refresh, exec, mutate, select, ui, openPalette, resolveConflicts]
   )
 
   return (

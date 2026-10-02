@@ -17,6 +17,8 @@ export interface RepoCtx {
   superproject: string | null
   /** Full ref names hidden from the graph */
   hidden: string[]
+  /** Graph line color (lane color index) of each loaded commit, by sha */
+  laneColors: Map<string, number>
   openRepo(dir: string): void
   refresh(scopes?: RefreshScope[]): Promise<void>
   /** Run a hook-aware command: reports failures, opens the console, refreshes afterwards. */
