@@ -71,7 +71,7 @@ export function Sidebar({ selected, view, onSelectWorking, onShowHooks }: Props)
             onContextMenu={(e) => branchMenu(e, b)}
             title={`${b.upstream ? `tracking ${b.upstream}` : 'no upstream'}${isHidden(b) ? ' (hidden from graph)' : ''}`}
           >
-            <BranchMark lane={repo.laneColors.get(b.sha)} current={b.current} dotted={b.current && changes > 0} />
+            <BranchMark lane={repo.laneColors.get(b.sha)} current={b.current} />
             <RefName name={b.name} lane={repo.laneColors.get(b.sha)} kind={b.current ? 'branch head' : 'branch'} />
             {(b.ahead || b.behind) ? (
               <span className="ab">
@@ -219,18 +219,11 @@ function SubmoduleSection() {
   )
 }
 
-/**
- * A branch's line in the graph, in miniature: its lane color, a filled node for the checked-out
- * branch, dotted while it has uncommitted changes (like the line from "Uncommitted changes" in
- * the graph). Branches whose tip isn't in the loaded graph get a grey dotted line.
- */
-function BranchMark({ lane, current = false, dotted = false }: { lane?: number; current?: boolean; dotted?: boolean }) {
-  // Grey until hovered, selected or checked out (see .branch-mark in styles.css).
-  const dash = dotted || lane === undefined ? '2.5 2' : undefined
+/** A dot in the branch's graph color (grey until hovered, selected or checked out), filled for the checked-out branch. */
+function BranchMark({ lane, current = false }: { lane?: number; current?: boolean }) {
   return (
-    <svg width="14" height="22" viewBox="0 0 14 22" className="branch-mark" aria-hidden style={lane === undefined ? undefined : ({ '--mark': `var(--lane-${lane})` } as React.CSSProperties)}>
-      <line x1="7" y1="0" x2="7" y2="22" stroke="currentColor" strokeWidth="2" strokeDasharray={dash} opacity={0.85} />
-      <circle cx="7" cy="11" r={current ? 4 : 3.4} fill={current ? 'currentColor' : 'var(--paper-2)'} stroke="currentColor" strokeWidth="1.8" />
+    <svg width="10" height="10" viewBox="0 0 10 10" className="branch-mark" aria-hidden style={lane === undefined ? undefined : ({ '--mark': `var(--lane-${lane})` } as React.CSSProperties)}>
+      <circle cx="5" cy="5" r={current ? 4 : 3.4} fill={current ? 'currentColor' : 'var(--paper-2)'} stroke="currentColor" strokeWidth="1.8" />
     </svg>
   )
 }

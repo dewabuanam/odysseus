@@ -543,7 +543,7 @@ body:has(.overlay, .palette-overlay) .titlebar * { -webkit-app-region: no-drag; 
 .st.st-A, .st.st-N, .st[class~='st-?'] { background: var(--diff-add-ink); color: var(--paper); border-color: var(--diff-add-ink); }
 .st.st-D { color: var(--diff-del-ink); border-color: var(--diff-del-ink); }
 .st.st-M, .st.st-R { color: var(--ai-working); border-color: var(--ai-working); }
-.sb-item .branch-mark { margin: -4px 0; flex-shrink: 0; }
+.sb-item .branch-mark { flex-shrink: 0; }
 .sb-ref { font-size: 12px; line-height: 17px; margin-right: 0; min-width: 0; max-width: 100%; font-family: var(--sans); }
 
 /* ---------- about */
