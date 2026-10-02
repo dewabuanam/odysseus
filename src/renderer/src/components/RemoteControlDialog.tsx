@@ -6,9 +6,9 @@ const DOCS = 'https://code.claude.com/docs/en/remote-control'
 
 /**
  * Shown the first time Remote Control is turned on: what it does, what it needs, and whether
- * every AI session should start with it from now on.
+ * it becomes the default for every repository and workspace or only the one in view (`label`).
  */
-export function RemoteControlDialog({ onClose, onEnable }: { onClose(): void; onEnable(everySession: boolean): void }) {
+export function RemoteControlDialog({ label, onClose, onEnable }: { label: string | null; onClose(): void; onEnable(everywhere: boolean): void }) {
   const [every, setEvery] = useState(true)
   return (
     <Modal onClose={onClose}>
@@ -32,10 +32,12 @@ export function RemoteControlDialog({ onClose, onEnable }: { onClose(): void; on
       </div>
       <label className="check">
         <input type="checkbox" checked={every} onChange={(e) => setEvery(e.target.checked)} />
-        Turn on Remote Control for every AI session I open
+        Turn on Remote Control for every repository and workspace by default
       </label>
       <div className="faint" style={{ fontSize: 12, margin: '4px 0 0 22px' }}>
-        {every ? 'You can turn it off again from the Remote button in the AI pane, the palette or Settings.' : 'Only the sessions open now get Remote Control.'}
+        {every || !label
+          ? 'Each repository or workspace can still turn it off with the Remote button in the AI pane. Change the default in the palette or Settings.'
+          : `Only ${label} gets Remote Control. Others follow the default (off).`}
       </div>
       <div className="buttons">
         <button className="btn" onClick={onClose}>Not now</button>

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { aggregateAi, programOf, type AiState, type Settings, type TerminalProfile } from '@shared/types'
+import { aggregateAi, programOf, remoteControlFor, type AiState, type Settings, type TerminalProfile } from '@shared/types'
 import { AI_LABEL, detectAiState, visibleText } from '../aiState'
 import { api } from '../api'
 import { useUi } from '../ui'
@@ -23,8 +23,10 @@ export interface TerminalHandle {
   ensure(): void
   /** Types `text` into the default AI here (starting it if needed) once it is ready for input. */
   send(text: string): void
-  /** Turns Remote Control on or off, introducing it the first time. */
+  /** Turns Remote Control on or off for the repository or workspace in view, introducing it the first time. */
   toggleRemote(): void
+  /** Turns the default Remote Control for every repository and workspace on or off. */
+  toggleRemoteDefault(): void
 }
 
 interface Session {
@@ -126,11 +128,14 @@ export function TerminalPane({ scopes, live, open, onClose, onAiStates, appSetti
     loadSettings()
   }, [open, appSettings, loadSettings])
 
-  const remoteOn = settings?.remoteControl === true
+  const remoteFor = (key: string) => !!settings && remoteControlFor(settings, key)
+  const remoteOn = !!scope && remoteFor(scope.key)
+  /** The scope in view sets Remote Control itself instead of following the default */
+  const remoteOwn = !!scope && settings?.remoteControlScopes?.[scope.key] !== undefined
   const start = useCallback(
     (base: TerminalProfile, sc: TermScope | null = scope): number | undefined => {
       if (!sc) return
-      const profile = withRemote(base, remoteOn, sc.label)
+      const profile = withRemote(base, remoteFor(sc.key), sc.label)
       // An AI started ahead of time for this place opens instantly instead of booting now.
       const spare = sessions.find((x) => x.spare && !x.exited && x.scope === sc.key && x.profile.name === profile.name && x.profile.command === profile.command)
       if (spare) {
@@ -144,40 +149,55 @@ export function TerminalPane({ scopes, live, open, onClose, onAiStates, appSetti
       setActiveBy((a) => ({ ...a, [sc.key]: key }))
       return key
     },
-    [scope, shellName, sessions, remoteOn]
+    [scope, shellName, sessions, settings]
   )
 
   const queue = (key: number, text: string) => outbox.current.set(key, [...(outbox.current.get(key) ?? []), text])
 
   /**
-   * Saves the Remote Control setting and turns it on in the Claude Code sessions already open,
-   * by typing /remote-control into each once it is ready for input.
+   * Saves Remote Control as the default (`'all'`) or for one repository or workspace, and turns
+   * it on in the Claude Code sessions already open that it now covers, by typing /remote-control
+   * into each once it is ready for input. Open sessions keep it when it is turned off.
    */
-  const enableRemote = async (everySession: boolean) => {
+  const setRemote = async (on: boolean, target: TermScope | 'all') => {
     setRemoteIntro(false)
-    const saved = await api.setSettings({ remoteControl: everySession, remoteControlSetup: true })
+    const cur = await loadSettings()
+    const scopesMap = { ...(cur.remoteControlScopes ?? {}) }
+    if (target !== 'all') {
+      // Matching the default again means following it, so a later default change applies here too.
+      if (on === cur.remoteControl) delete scopesMap[target.key]
+      else scopesMap[target.key] = { on, label: target.label }
+    }
+    const patch: Partial<Settings> = target === 'all' ? { remoteControl: on } : { remoteControlScopes: scopesMap }
+    const saved = await api.setSettings({ ...patch, remoteControlSetup: true })
     setSettings(saved)
     onSettings?.(saved)
-    const targets = sessions.filter((x) => !x.spare && !x.exited && !x.remote && hasRemote(x.profile))
+    const where = target === 'all' ? 'by default' : `for ${target.label}`
+    if (!on) {
+      const kept = sessions.some((x) => !x.spare && !x.exited && x.remote && (target === 'all' || x.scope === target.key) && !remoteControlFor(saved, x.scope))
+      return ui.toast(`Remote Control is off ${where}${kept ? '. Open sessions keep it until you close them.' : ''}`)
+    }
+    const targets = sessions.filter((x) => !x.spare && !x.exited && !x.remote && hasRemote(x.profile) && remoteControlFor(saved, x.scope))
     for (const t of targets) {
       const name = remoteName(scopes.find((x) => x.key === t.scope)?.label ?? t.cwd.split(/[\\/]/).filter(Boolean).pop() ?? '')
       queue(t.key, `/remote-control${name ? ` ${name}` : ''}`)
     }
     if (targets.length) setSessions((s) => s.map((x) => (targets.some((t) => t.key === x.key) ? { ...x, remote: true } : x)))
     const n = targets.length
-    const sessionsText = n ? `${n} open session${n > 1 ? 's' : ''}` : ''
-    ui.toast(everySession ? `Remote Control is on${n ? ` (also for ${sessionsText})` : ''}` : n ? `Remote Control is on for ${sessionsText}` : 'No Claude Code session is open yet')
+    ui.toast(`Remote Control is on ${where}${n ? ` (also for ${n} open session${n > 1 ? 's' : ''})` : ''}`)
   }
 
   const toggleRemote = async () => {
     const s = await loadSettings()
+    if (!scope) return
     if (!s.remoteControlSetup) return setRemoteIntro(true)
-    if (!s.remoteControl) return enableRemote(true)
-    const saved = await api.setSettings({ remoteControl: false })
-    setSettings(saved)
-    onSettings?.(saved)
-    const kept = sessions.some((x) => !x.spare && !x.exited && x.remote)
-    ui.toast(kept ? 'Remote Control is off for new sessions. Open sessions keep it until you close them.' : 'Remote Control is off')
+    setRemote(!remoteControlFor(s, scope.key), scope)
+  }
+
+  const toggleRemoteDefault = async () => {
+    const s = await loadSettings()
+    if (!s.remoteControlSetup) return setRemoteIntro(true)
+    setRemote(!s.remoteControl, 'all')
   }
 
   // AI CLIs take seconds to boot (Claude Code about 4 to 5). Keep one copy of the default AI
@@ -199,8 +219,8 @@ export function TerminalPane({ scopes, live, open, onClose, onAiStates, appSetti
     }, 2500)
     return () => clearTimeout(t)
   }, [scope?.key, scope?.cwd, prewarm?.name, prewarm?.command])
-  const live$ = useRef({ start, scopes, scope, mine, active, toggleRemote })
-  live$.current = { start, scopes, scope, mine, active, toggleRemote }
+  const live$ = useRef({ start, scopes, scope, mine, active, toggleRemote, toggleRemoteDefault })
+  live$.current = { start, scopes, scope, mine, active, toggleRemote, toggleRemoteDefault }
 
   useImperativeHandle(ref, () => ({
     start: async (profile, kind) => {
@@ -226,7 +246,8 @@ export function TerminalPane({ scopes, live, open, onClose, onAiStates, appSetti
       const key = target?.key ?? go(p, cur)
       if (key !== undefined) queue(key, text)
     },
-    toggleRemote: () => live$.current.toggleRemote()
+    toggleRemote: () => live$.current.toggleRemote(),
+    toggleRemoteDefault: () => live$.current.toggleRemoteDefault()
   }), [loadSettings])
 
   // Sessions of a closed tab or workspace end with it.
@@ -304,7 +325,7 @@ export function TerminalPane({ scopes, live, open, onClose, onAiStates, appSetti
             <button
               className={`btn small remote-toggle ${remoteOn ? 'on' : ''}`}
               onClick={() => toggleRemote()}
-              title={remoteOn ? 'Remote Control is on: Claude Code sessions can be continued from claude.ai or the Claude app. Click to turn it off.' : 'Remote Control is off. Click to continue Claude Code sessions from claude.ai or the Claude app.'}
+              title={`${remoteOn ? `Remote Control is on for ${scope?.label}: Claude Code sessions can be continued from claude.ai or the Claude app` : `Remote Control is off for ${scope?.label}`}${remoteOwn ? '' : ' (the default)'}. Click to turn it ${remoteOn ? 'off' : 'on'} here.`}
             >
               <span className="remote-dot" />
               Remote
@@ -359,7 +380,7 @@ export function TerminalPane({ scopes, live, open, onClose, onAiStates, appSetti
           )}
         </div>
       </div>
-      {remoteIntro && <RemoteControlDialog onClose={() => setRemoteIntro(false)} onEnable={enableRemote} />}
+      {remoteIntro && <RemoteControlDialog label={scope?.label ?? null} onClose={() => setRemoteIntro(false)} onEnable={(every) => setRemote(true, every || !scope ? 'all' : scope)} />}
     </>
   )
 }
@@ -388,7 +409,7 @@ function TermView({ cwd, profile, visible, onExit, onAi, pull }: TermViewProps) 
     const term = new Terminal({
       fontFamily: getComputedStyle(document.documentElement).getPropertyValue('--mono').trim() || 'Consolas, monospace',
       fontSize: 13,
-      cursorBlink: true,
+      cursorBlink: false,
       scrollback: 10000,
       allowProposedApi: true,
       theme: xtermTheme()

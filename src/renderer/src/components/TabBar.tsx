@@ -18,9 +18,11 @@ interface Props {
   onNew(): void
   /** Move a tab to a new position in the tab order */
   onMove(path: string, index: number): void
-  /** A collapsed group's chip was clicked: switch to that group */
+  /** Workspace ids the user collapsed; the others stay expanded */
+  collapsed: string[]
+  /** A collapsed group's chip was clicked: expand it and switch to that group */
   onOpenGroup(w: Workspace): void
-  /** The open group's chip was clicked: collapse it, leaving no tab focused */
+  /** An expanded group's chip was clicked: collapse it (leaving no tab focused if it held the active one) */
   onCollapseGroup(w: Workspace): void
   onGroupMenu(e: React.MouseEvent, w: Workspace): void
   onTabMenu(e: React.MouseEvent, path: string): void
@@ -33,10 +35,9 @@ const AiDot = ({ state }: { state: AiState | null }) => (state ? <span className
 
 /**
  * Repository tabs on their own row, grouped like browser tab groups: each workspace is a
- * colored chip. Only the group holding the active tab is expanded; the others show just their
- * chip. Tabs that don't fit live in the ▾ menu; the active tab is always visible.
+ * colored chip. Groups stay expanded until their chip is clicked to collapse them. Tabs that don't fit live in the ▾ menu; the active tab is always visible.
  */
-export function TabBar({ tabs, active, workspaces, onSelect, onClose, onNew, onOpenGroup, onCollapseGroup, onGroupMenu, onTabMenu, repoAi, groupAi }: Props) {
+export function TabBar({ tabs, active, workspaces, collapsed, onSelect, onClose, onNew, onOpenGroup, onCollapseGroup, onGroupMenu, onTabMenu, repoAi, groupAi }: Props) {
   const ui = useUi()
   const runs = useRuns()
   const ref = useRef<HTMLDivElement>(null)
@@ -50,7 +51,7 @@ export function TabBar({ tabs, active, workspaces, onSelect, onClose, onNew, onO
     return () => ro.disconnect()
   }, [])
 
-  const items = barItems(tabs, workspaces, active)
+  const items = barItems(tabs, workspaces, active, collapsed)
   const itemW = (i: BarItem) => (i.kind === 'group' ? chipWidth(i.ws) : TAB_W)
   const budget = width - BUTTONS_W
   let fit = 0

@@ -105,8 +105,26 @@ export function SettingsDialog({ onClose, onSaved }: { onClose(): void; onSaved(
           </label>
           <label className="check" style={{ marginBottom: 6 }}>
             <input type="checkbox" checked={s.remoteControl === true} onChange={(e) => setS({ ...s, remoteControl: e.target.checked, remoteControlSetup: true })} />
-            Remote Control: start Claude Code sessions so you can continue them from claude.ai or the Claude app
+            Remote Control by default: start Claude Code sessions so you can continue them from claude.ai or the Claude app
           </label>
+          {Object.entries(s.remoteControlScopes ?? {}).map(([key, o]) => (
+            <div key={key} className="row" style={{ gap: 8, margin: '0 0 6px 22px', fontSize: 12 }}>
+              <label className="check">
+                <input type="checkbox" checked={o.on} onChange={(e) => setS({ ...s, remoteControlScopes: { ...s.remoteControlScopes, [key]: { ...o, on: e.target.checked } } })} />
+                {o.label} ({key.startsWith('ws:') ? 'workspace' : 'repository'})
+              </label>
+              <button
+                className="btn small"
+                title="Follow the default instead"
+                onClick={() => {
+                  const { [key]: _, ...rest } = s.remoteControlScopes
+                  setS({ ...s, remoteControlScopes: rest })
+                }}
+              >
+                Use default
+              </button>
+            </div>
+          ))}
           <textarea className="textarea mono" rows={3} value={profilesText} placeholder={'Claude Code = claude\nCodex = codex'} onChange={(e) => setProfilesText(e.target.value)} />
         </div>
       </div>

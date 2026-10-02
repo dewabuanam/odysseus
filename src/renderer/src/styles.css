@@ -217,8 +217,7 @@ kbd {
 .dot.off { border-color: var(--ink-3); background: transparent; }
 .dot.fail { background: var(--paper); border-width: 2px; box-shadow: 0 0 0 1.5px var(--ink); }
 .dot.warn { background: repeating-linear-gradient(-45deg, var(--ink) 0 1px, transparent 1px 3px); }
-.dot.run { background: var(--ink); animation: pulse 1s infinite; }
-@keyframes pulse { 50% { opacity: 0.25; } }
+.dot.run { background: var(--ink); }
 
 /* ---------- commit list */
 .list-header { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); }
@@ -355,8 +354,7 @@ kbd {
 .toasts { position: fixed; right: 14px; bottom: 44px; display: flex; flex-direction: column; gap: 8px; z-index: 70; }
 .toast { background: var(--paper); border: 1.5px solid var(--ink); border-radius: var(--sketch); padding: 7px 12px; max-width: 420px; box-shadow: 3px 3px 0 var(--ink); white-space: pre-wrap; }
 .toast.error { background: var(--ink); color: var(--paper); font-weight: 600; }
-.spinner { width: 12px; height: 12px; border: 2px solid var(--ink); border-right-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; display: inline-block; }
-@keyframes spin { to { transform: rotate(360deg); } }
+.spinner { width: 12px; height: 12px; border: 2px solid var(--ink); border-right-color: transparent; border-radius: 50%; display: inline-block; }
 .empty { padding: 30px; text-align: center; color: var(--ink-3); font-family: var(--hand); font-size: 17px; }
 
 /* The logo is black ink with white fills; flip it for the chalkboard theme. */
@@ -528,10 +526,9 @@ select.input option, select option { background: var(--paper); color: var(--ink)
 /* ---------- AI status dots: red needs you, yellow working, green idle */
 :root { --ai-waiting: #d93a32; --ai-working: #e0a400; --ai-idle: #2f9a4f; }
 .ai-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 1.5px var(--paper); }
-.ai-dot.ai-waiting { background: var(--ai-waiting); animation: ai-pulse 1s ease-in-out infinite; }
-.ai-dot.ai-working { background: var(--ai-working); animation: ai-pulse 1.6s ease-in-out infinite; }
+.ai-dot.ai-waiting { background: var(--ai-waiting); }
+.ai-dot.ai-working { background: var(--ai-working); }
 .ai-dot.ai-idle { background: var(--ai-idle); }
-@keyframes ai-pulse { 50% { opacity: 0.35; } }
 
 /* While a dialog or the palette is open, the title bar stops being a window drag region:
    drag regions swallow clicks, so clicking the header wouldn't close the dialog. */

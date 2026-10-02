@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, shell } from 'electron'
 import { existsSync, readdirSync, watch, type FSWatcher } from 'node:fs'
 import { join } from 'node:path'
 import { buildEnv, diagnostics, envPath, initEnv } from './env'
@@ -171,10 +171,11 @@ function dotIcon(state: AiState): Electron.NativeImage {
  * or green dot on Windows, a dock badge on macOS. Flashes the taskbar when an AI starts
  * waiting for you while Odysseus is in the background.
  */
-function setAiStatus(state: AiState | null, badge?: string | null): void {
+function setAiStatus(state: AiState | null, badge?: string | null, working = 0): void {
   if (!win) return
   const prev = aiStatus
   aiStatus = state
+  notifyAiStatus(prev, state, working)
   if (process.platform === 'win32') {
     const icon = badge ? nativeImage.createFromDataURL(badge) : state ? dotIcon(state) : null
     win.setOverlayIcon(icon && !icon.isEmpty() ? icon : null, state ? AI_TEXT[state] : '')
@@ -182,6 +183,24 @@ function setAiStatus(state: AiState | null, badge?: string | null): void {
   else if (process.platform === 'darwin') app.dock?.setBadge(state === 'waiting' ? '!' : state === 'working' ? '•' : '')
   if (state === 'waiting' && prev !== 'waiting' && !win.isFocused()) win.flashFrame(true)
   if (state !== 'waiting') win.flashFrame(false)
+}
+
+/**
+ * A fullscreen window hides the taskbar and its status dot, so announce the changes worth
+ * acting on as notifications instead: an AI waiting for you, or every AI finished.
+ */
+function notifyAiStatus(prev: AiState | null, state: AiState | null, working: number): void {
+  if (!win?.isFullScreen() || !Notification.isSupported() || prev === state) return
+  let body: string | null = null
+  if (state === 'waiting') body = working > 0 ? `${AI_TEXT.waiting}, ${working} still working` : AI_TEXT.waiting
+  else if (prev === 'working' && state === 'idle') body = 'AI finished'
+  if (!body) return
+  const n = new Notification({ title: 'Odysseus', body, silent: state !== 'waiting', icon: existsSync(iconPath) ? iconPath : undefined })
+  n.on('click', () => {
+    win?.show()
+    win?.focus()
+  })
+  n.show()
 }
 
 // ------------------------------------------------------------------ open repositories (tabs)
@@ -328,7 +347,7 @@ const appApi: Record<string, Handler> = {
   termResize: (id: number, cols: number, rows: number) => terminals.resize(id, cols, rows),
   termKill: (id: number) => terminals.kill(id),
   aiCommands: (command: string, cwd: string) => aiCommands(command, cwd),
-  setAiStatus: (state: AiState | null, badge?: string | null) => setAiStatus(state, badge),
+  setAiStatus: (state: AiState | null, badge?: string | null, working?: number) => setAiStatus(state, badge, working),
   platform: () => process.platform,
   windowMinimize: () => win?.minimize(),
   windowToggleMaximize: () => (win?.isMaximized() ? win.unmaximize() : win?.maximize()),
@@ -461,6 +480,12 @@ function createWindow(): void {
   if (process.env.ELECTRON_RENDERER_URL) win.loadURL(process.env.ELECTRON_RENDERER_URL)
   else win.loadFile(join(__dirname, '../renderer/index.html'))
 }
+
+// Scrolling jumps straight to its target instead of easing there.
+app.commandLine.appendSwitch('disable-smooth-scrolling')
+
+// Windows shows notifications under this id; it matches the installer's shortcut.
+if (process.platform === 'win32') app.setAppUserModelId('com.odysseus.git')
 
 app.whenReady().then(async () => {
   loadStore()

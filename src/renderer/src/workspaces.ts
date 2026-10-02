@@ -59,10 +59,10 @@ export function commonFolder(paths: string[]): string {
 export type BarItem = { kind: 'group'; ws: Workspace; open: boolean } | { kind: 'tab'; tab: RepoSummary; ws?: Workspace }
 
 /**
- * Tab row order: a group's chip sits where its first tab is, with all its tabs after it. Only
- * the group holding the active tab is expanded; every other group shows just its chip.
+ * Tab row order: a group's chip sits where its first tab is, with all its tabs after it. Groups
+ * stay expanded unless collapsed (by id); the group holding the active tab is always expanded.
  */
-export function barItems(tabs: RepoSummary[], ws: Workspace[], active: string | null): BarItem[] {
+export function barItems(tabs: RepoSummary[], ws: Workspace[], active: string | null, collapsed: string[] = []): BarItem[] {
   const activeWs = wsOf(ws, active)
   const done = new Set<string>()
   const out: BarItem[] = []
@@ -74,7 +74,7 @@ export function barItems(tabs: RepoSummary[], ws: Workspace[], active: string | 
     }
     if (done.has(w.id)) continue
     done.add(w.id)
-    const open = w.id === activeWs?.id
+    const open = w.id === activeWs?.id || !collapsed.includes(w.id)
     out.push({ kind: 'group', ws: w, open })
     if (open) for (const m of tabs.filter((x) => wsOf([w], x.path))) out.push({ kind: 'tab', tab: m, ws: w })
   }

@@ -99,7 +99,7 @@ Press **Ctrl+P**. Every action lives there, with fuzzy matching (`chk` finds *Ch
 
 ### Workspaces
 
-Group tabs into **workspaces**, like browser tab groups. Each workspace is a colored chip in the tab row. The workspace holding the current tab is expanded and shows all its tabs; every other workspace collapses to its chip. Click a chip to switch to that workspace, at the tab you last used there.
+Group tabs into **workspaces**, like browser tab groups. Each workspace is a colored chip in the tab row. Workspaces stay expanded with all their tabs until you click a chip to collapse it; the workspace holding the current tab is always expanded. Click a collapsed chip to expand it and switch to that workspace, at the tab you last used there.
 
 - **Workspace: New from Folder** opens every repository in a folder (or the folder itself) as one group. Right-click a tab to add it to a workspace or take it out.
 - Right-click a chip to rename it, change its color or folder, open the AI there, ungroup, or close the workspace with its tabs.
@@ -107,11 +107,11 @@ Group tabs into **workspaces**, like browser tab groups. Each workspace is a col
 
 ### AI and terminal pane
 
-The **Claude Code** button in the title bar (or **AI: Open** in the palette, or Ctrl+Shift+T) opens a pane on the right with your AI coding tool running in the current repository, or in the workspace folder when the tab belongs to a workspace (switch with **Workspace / Repository**). Sessions are real terminals and keep running while the pane is hidden. Start more from the pane: your default AI, Codex, Gemini, Copilot, or a plain PowerShell. The default AI, the shell and the list of programs are in **Settings > Terminal pane** and **Preferences: Default AI** in the palette. A program that isn't installed yet is installed with its official command the first time you start it.
+The **Claude Code** button in the title bar (or **AI: Open** in the palette, or Ctrl+Shift+T) opens a pane on the right with your AI coding tool running in the current repository, or in the workspace folder when the tab belongs to a workspace (switch with **Workspace / Repository**). Sessions are real terminals and keep running while the pane is hidden. Start more from the pane: your default AI, Codex, Gemini, Copilot, or a plain PowerShell. The default AI, the shell and the list of programs are in **Settings > Terminal pane** and **Preferences: Default AI** in the palette. A program that isn't installed yet is installed with its official command the first time you start it. App shortcuts take priority over the pane: a key bound in your keymap runs the Odysseus command even while you type in a session. When Odysseus is fullscreen and the taskbar is hidden, a notification tells you when an AI needs your input or all AI work is done.
 
 **AI commands in the palette.** The default AI's slash commands are palette commands named after it: built-ins, your skills and custom commands, the project's, and installed plugins'. *Claude: Commit* types `/commit` into the session in view (starting one if needed); press Enter to add text after it first. The text waits until the AI is ready at its prompt.
 
-**Remote Control.** The **Remote** button in the AI pane (or **AI: Turn Remote Control On/Off**, or Settings) lets you continue Claude Code sessions from claude.ai or the Claude app. The first time, a window explains it and asks whether every AI session you open should start with it. Sessions already open get it right away and show a *remote* badge. It needs a claude.ai login on a Pro, Max, Team or Enterprise plan.
+**Remote Control.** Lets you continue Claude Code sessions from claude.ai or the Claude app. It has a default for every repository and workspace (**AI: Turn Remote Control On/Off by Default**, or Settings), and each repository or workspace can have its own setting: the **Remote** button in the AI pane (or **AI: Toggle Remote Control Here**) switches it for the one in view. Settings lists every repository and workspace with its own setting, with **Use default** to follow the default again. The first time, a window explains it and asks whether to turn it on everywhere or only here. Sessions already open get it right away and show a *remote* badge. It needs a claude.ai login on a Pro, Max, Team or Enterprise plan.
 
 ### Context menus
 

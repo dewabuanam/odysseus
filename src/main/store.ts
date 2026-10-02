@@ -35,6 +35,7 @@ const DEFAULTS: StoreData = {
     terminalDefault: 'Claude Code',
     terminalPrewarm: true,
     remoteControl: false,
+    remoteControlScopes: {},
     remoteControlSetup: false
   },
   recentRepos: [],

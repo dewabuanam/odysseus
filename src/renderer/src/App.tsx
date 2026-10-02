@@ -257,6 +257,23 @@ function Shell() {
     if (w && active && w.lastActive !== active) saveWorkspaces(workspaces.map((x) => (x.id === w.id ? { ...x, lastActive: active } : x)))
   }, [active, workspaces, saveWorkspaces])
 
+  // Workspace groups the user collapsed in the tab row; every other group stays expanded.
+  const [collapsedWs, setCollapsedWs] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('odysseus.collapsedWorkspaces') ?? '[]')
+    } catch {
+      return []
+    }
+  })
+  const setCollapsed = (ids: string[]) => {
+    setCollapsedWs(ids)
+    try {
+      localStorage.setItem('odysseus.collapsedWorkspaces', JSON.stringify(ids))
+    } catch {
+      /* storage unavailable */
+    }
+  }
+
   const openWorkspace = useCallback((w: Workspace) => {
     const { tabs: cur } = stateRef.current
     const target = cur.find((t) => w.lastActive && norm(t.path) === norm(w.lastActive)) ?? cur.find((t) => wsOf([w], t.path))
@@ -372,7 +389,7 @@ function Shell() {
   const groupAi = (w: Workspace) => aggregateAi([aiStates[`ws:${w.id}`], ...w.repos.map(repoAi)])
   const overallAi = aggregateAi(Object.values(aiStates))
   useEffect(() => {
-    api.setAiStatus(overallAi, overallAi ? aiBadge(overallAi, aiWorking) : null)
+    api.setAiStatus(overallAi, overallAi ? aiBadge(overallAi, aiWorking) : null, aiWorking)
   }, [overallAi, aiWorking])
 
   /** Runs `fn` once the pane has mounted (the first open mounts it), instead of guessing a delay. */
@@ -460,10 +477,17 @@ function Shell() {
       .map((p) => ({ id: `ai.profile.${p.name}`, title: `AI: Open ${p.name}`, cmdline: p.command, when: !!stateRef.current.active, run: () => openTerminal(p) })),
     {
       id: 'ai.remote',
-      title: `AI: Turn Remote Control ${appSettings?.remoteControl ? 'Off' : 'On'}`,
-      detail: 'continue Claude Code sessions from claude.ai or the Claude app',
+      title: 'AI: Toggle Remote Control Here',
+      detail: 'for the repository or workspace in the AI pane; continue Claude Code sessions from claude.ai or the Claude app',
       when: !!aiProfile && hasRemote(aiProfile),
       run: () => withPane((h) => h.toggleRemote())
+    },
+    {
+      id: 'ai.remote.default',
+      title: `AI: Turn Remote Control ${appSettings?.remoteControl ? 'Off' : 'On'} by Default`,
+      detail: 'for every repository and workspace without its own setting',
+      when: !!aiProfile && hasRemote(aiProfile),
+      run: () => withPane((h) => h.toggleRemoteDefault())
     },
     ...aiSlashCommands(),
     { id: 'term.shell', title: 'Terminal: New Shell', when: !!stateRef.current.active, run: () => openTerminal({ name: 'Shell', command: '' }) },
@@ -555,22 +579,12 @@ function Shell() {
   useEffect(() => {
     let lastShift = 0
     let chord: { first: string; at: number } | null = null
+    const inTerm = (e: KeyboardEvent) => !!(e.target as HTMLElement).closest?.('.term-pane')
     const onKey = (e: KeyboardEvent) => {
       if (palette || settingsOpen || aboutOpen) return
-      // Keys typed into the terminal pane belong to the program running there (shells, AI
-      // CLIs); only the terminal toggle itself still works.
-      if ((e.target as HTMLElement).closest?.('.term-pane')) {
-        if (bindings['view.terminal']?.some((k) => matchesKeys(e, k))) {
-          const c = allCommandsRef.current().find((x) => x.id === 'view.terminal')
-          if (c) {
-            e.preventDefault()
-            run(c)
-          }
-        }
-        return
-      }
-      // Double-tap Shift (JetBrains "Search Everywhere")
-      if (e.key === 'Shift' && !e.repeat) {
+      // Double-tap Shift (JetBrains "Search Everywhere"); not in the terminal, where typing
+      // capitals would trip it.
+      if (e.key === 'Shift' && !e.repeat && !inTerm(e)) {
         const now = Date.now()
         if (now - lastShift < 350 && bindings['app.palette']?.includes('Shift Shift')) {
           lastShift = 0
@@ -634,8 +648,22 @@ function Shell() {
       }
       if (!armChord()) chord = null
     }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
+    const onBubble = (e: KeyboardEvent) => {
+      if (!inTerm(e)) onKey(e)
+    }
+    // App shortcuts take priority over the terminal pane (shells, AI CLIs): match them in the
+    // capture phase, before xterm turns the key into input, and keep handled keys from it.
+    const onCapture = (e: KeyboardEvent) => {
+      if (!inTerm(e)) return
+      onKey(e)
+      if (e.defaultPrevented) e.stopPropagation()
+    }
+    window.addEventListener('keydown', onBubble)
+    window.addEventListener('keydown', onCapture, true)
+    return () => {
+      window.removeEventListener('keydown', onBubble)
+      window.removeEventListener('keydown', onCapture, true)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [palette, settingsOpen, aboutOpen, keymap, openPalette])
 
@@ -675,10 +703,17 @@ function Shell() {
           workspaces={workspaces}
           onSelect={selectTab}
           onClose={closeTab}
-          onOpenGroup={openWorkspace}
-          onCollapseGroup={() => {
-            setActive(null)
-            persist(stateRef.current.tabs, null)
+          collapsed={collapsedWs}
+          onOpenGroup={(w) => {
+            setCollapsed(collapsedWs.filter((id) => id !== w.id))
+            openWorkspace(w)
+          }}
+          onCollapseGroup={(w) => {
+            setCollapsed([...collapsedWs, w.id])
+            if (stateRef.current.active && wsOf([w], stateRef.current.active)) {
+              setActive(null)
+              persist(stateRef.current.tabs, null)
+            }
           }}
           repoAi={repoAi}
           groupAi={groupAi}

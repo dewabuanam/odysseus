@@ -316,8 +316,22 @@ export interface Settings {
   terminalPrewarm: boolean
   /** Start every Claude Code session with Remote Control, so it can be continued from claude.ai or the Claude app */
   remoteControl: boolean
+  /** Remote Control per repository or workspace (by terminal scope key), overriding `remoteControl` */
+  remoteControlScopes: Record<string, RemoteControlOverride>
   /** The Remote Control introduction has been shown */
   remoteControlSetup: boolean
+}
+
+/** Remote Control set for one repository or workspace instead of following the default. */
+export interface RemoteControlOverride {
+  on: boolean
+  /** Repository or workspace name, for Settings */
+  label: string
+}
+
+/** Whether Claude Code sessions in the scope start with Remote Control: its own setting, else the default. */
+export function remoteControlFor(s: Settings, scopeKey: string): boolean {
+  return s.remoteControlScopes?.[scopeKey]?.on ?? s.remoteControl === true
 }
 
 /** A program the terminal pane can start, run inside the configured shell. */
