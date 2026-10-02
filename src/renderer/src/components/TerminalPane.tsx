@@ -2,7 +2,7 @@ import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
-import { aggregateAi, programOf, remoteControlFor, type AiState, type Settings, type TerminalProfile } from '@shared/types'
+import { aggregateAi, programOf, remoteControlFor, type AiPaneState, type AiState, type Settings, type TerminalProfile } from '@shared/types'
 import { AI_LABEL, detectAiState, visibleText } from '../aiState'
 import { api } from '../api'
 import { useUi } from '../ui'
@@ -31,6 +31,8 @@ export interface TerminalHandle {
 
 interface Session {
   key: number
+  /** Stable id, saved with the pane; Claude Code also uses it as the conversation id to resume */
+  sid: string
   scope: string
   cwd: string
   title: string
@@ -46,6 +48,16 @@ interface Session {
 
 const SHELL: TerminalProfile = { name: 'Shell', command: '' }
 let nextKey = 1
+
+/** A random UUID (v4), the form Claude Code takes for a conversation id. */
+function uuid(): string {
+  if (typeof crypto.randomUUID === 'function') return crypto.randomUUID()
+  const b = crypto.getRandomValues(new Uint8Array(16))
+  b[6] = (b[6] & 0x0f) | 0x40
+  b[8] = (b[8] & 0x3f) | 0x80
+  const h = [...b].map((x) => x.toString(16).padStart(2, '0')).join('')
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`
+}
 
 /** Terminal colors from the active theme, so the pane looks like the rest of the app. */
 function xtermTheme() {
@@ -78,7 +90,11 @@ interface Props {
   scopes: TermScope[]
   /** Scope keys still open; sessions of any other scope are ended */
   live: string[]
+  /** Tabs and workspaces are loaded: the sessions saved for the ones still open come back */
+  ready: boolean
   open: boolean
+  /** The pane is switched on (it may still be hidden, on the start page); saved for the next launch */
+  wanted?: boolean
   onClose(): void
   /** Most urgent AI state per scope key, and how many sessions are working, on every change */
   onAiStates(states: Record<string, AiState>, working: number): void
@@ -91,9 +107,10 @@ interface Props {
 
 /**
  * Right-hand pane with real terminals: a shell, or an AI CLI such as Claude Code, started in the
- * repository or its workspace folder. Sessions keep running while the pane is hidden.
+ * repository or its workspace folder. Sessions keep running while the pane is hidden, and come
+ * back on the next launch (Claude Code resuming each one's own conversation).
  */
-export function TerminalPane({ scopes, live, open, onClose, onAiStates, appSettings, onSettings, ref }: Props) {
+export function TerminalPane({ scopes, live, ready, open, wanted = open, onClose, onAiStates, appSettings, onSettings, ref }: Props) {
   const ui = useUi()
   const [sessions, setSessions] = useState<Session[]>([])
   const [activeBy, setActiveBy] = useState<Record<string, number>>({})
@@ -145,7 +162,7 @@ export function TerminalPane({ scopes, live, open, onClose, onAiStates, appSetti
       }
       const key = nextKey++
       const remote = profile !== base
-      setSessions((s) => [...s, { key, scope: sc.key, cwd: sc.cwd, title: profile.command ? base.name : shellName, profile, exited: false, ai: profile.command ? 'working' : null, remote }])
+      setSessions((s) => [...s, { key, sid: uuid(), scope: sc.key, cwd: sc.cwd, title: profile.command ? base.name : shellName, profile, exited: false, ai: profile.command ? 'working' : null, remote }])
       setActiveBy((a) => ({ ...a, [sc.key]: key }))
       return key
     },
@@ -214,7 +231,7 @@ export function TerminalPane({ scopes, live, open, onClose, onAiStates, appSetti
         const keep = s.filter((x) => !x.spare || (x.scope === scope.key && x.profile.command === prewarm.command && !x.exited))
         const busy = keep.some((x) => x.scope === scope.key)
         if (busy) return keep.length === s.length ? s : keep
-        return [...keep, { key: nextKey++, scope: scope.key, cwd: scope.cwd, title: prewarm.name, profile: prewarm, exited: false, ai: null, spare: true, remote: remoteOn && hasRemote(prewarm) }]
+        return [...keep, { key: nextKey++, sid: uuid(), scope: scope.key, cwd: scope.cwd, title: prewarm.name, profile: prewarm, exited: false, ai: null, spare: true, remote: remoteOn && hasRemote(prewarm) }]
       })
     }, 2500)
     return () => clearTimeout(t)
@@ -250,10 +267,48 @@ export function TerminalPane({ scopes, live, open, onClose, onAiStates, appSetti
     toggleRemoteDefault: () => live$.current.toggleRemoteDefault()
   }), [loadSettings])
 
+  // The sessions left open last time, for the repositories and workspaces still open.
+  const restored = useRef(false)
+  useEffect(() => {
+    if (!ready || restored.current) return
+    api.getAiPane().then(
+      (saved) => {
+        const back: Session[] = saved.sessions.filter((x) => live.includes(x.scope)).map((x) => ({ ...x, key: nextKey++, sid: x.id, exited: false, ai: x.profile.command ? 'working' : null }))
+        const act: Record<string, number> = {}
+        for (const [sc, id] of Object.entries(saved.active)) {
+          const k = back.find((x) => x.sid === id && x.scope === sc)?.key
+          if (k !== undefined) act[sc] = k
+        }
+        // A spare started meanwhile isn't needed where sessions came back.
+        setSessions((s) => [...s.filter((x) => !x.spare || !back.some((b) => b.scope === x.scope)), ...back])
+        setActiveBy((a) => ({ ...act, ...a }))
+        restored.current = true
+      },
+      () => (restored.current = true)
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready])
+
+  // Save the pane as it is whenever its sessions, the one in view, or its visibility change.
+  const saved = sessions.filter((x) => !x.spare && !x.exited)
+  const saveKey = JSON.stringify([wanted, saved.map((x) => [x.sid, x.scope, x.title, x.remote]), activeBy])
+  useEffect(() => {
+    if (!restored.current) return
+    const active: Record<string, string> = {}
+    for (const [sc, k] of Object.entries(activeBy)) {
+      const sid = saved.find((x) => x.key === k)?.sid
+      if (sid) active[sc] = sid
+    }
+    const pane: AiPaneState = { open: wanted, active, sessions: saved.map((x) => ({ id: x.sid, scope: x.scope, cwd: x.cwd, title: x.title, profile: x.profile, remote: x.remote })) }
+    api.setAiPane(pane).catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saveKey, restored.current])
+
   // Sessions of a closed tab or workspace end with it.
   useEffect(() => {
+    if (!ready) return
     setSessions((s) => (s.some((x) => !live.includes(x.scope)) ? s.filter((x) => live.includes(x.scope)) : s))
-  }, [live.join('\0')])
+  }, [live.join('\0'), ready])
 
   const close = (key: number) => {
     outbox.current.delete(key)
@@ -363,7 +418,7 @@ export function TerminalPane({ scopes, live, open, onClose, onAiStates, appSetti
         )}
         <div className="term-body">
           {sessions.map((s) => (
-            <TermView key={s.key} cwd={s.cwd} profile={s.profile} visible={open && s.scope === scope?.key && s.key === active} onExit={() => onExit(s.key)} onAi={s.profile.command ? (a) => onAi(s.key, a) : undefined} pull={() => outbox.current.get(s.key)?.shift()} />
+            <TermView key={s.key} cwd={s.cwd} profile={s.profile} sessionId={s.sid} visible={open && s.scope === scope?.key && s.key === active} onExit={() => onExit(s.key)} onAi={s.profile.command ? (a) => onAi(s.key, a) : undefined} pull={() => outbox.current.get(s.key)?.shift()} />
           ))}
           {mine.length === 0 && (
             <div className="term-empty">
@@ -388,6 +443,8 @@ export function TerminalPane({ scopes, live, open, onClose, onAiStates, appSetti
 interface TermViewProps {
   cwd: string
   profile: TerminalProfile
+  /** Conversation id for Claude Code: started with it the first time, resumed after that */
+  sessionId?: string
   visible: boolean
   onExit(): void
   onAi?(state: AiState): void
@@ -395,7 +452,7 @@ interface TermViewProps {
   pull?(): string | undefined
 }
 
-function TermView({ cwd, profile, visible, onExit, onAi, pull }: TermViewProps) {
+function TermView({ cwd, profile, sessionId, visible, onExit, onAi, pull }: TermViewProps) {
   const host = useRef<HTMLDivElement>(null)
   const ref = useRef<{ term: Terminal; fit: FitAddon; id: number | null } | null>(null)
   const onExitRef = useRef(onExit)
@@ -461,7 +518,7 @@ function TermView({ cwd, profile, visible, onExit, onAi, pull }: TermViewProps) 
       /* not laid out yet */
     }
     api
-      .termCreate(cwd, term.cols, term.rows, profile)
+      .termCreate(cwd, term.cols, term.rows, profile, sessionId)
       .then((id) => {
         if (disposed) return void api.termKill(id)
         state.id = id

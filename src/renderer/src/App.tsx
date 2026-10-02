@@ -215,10 +215,23 @@ function Shell() {
       }
       setTabs(opened)
       setActive(opened.find((t) => norm(t.path) === norm(saved.active ?? ''))?.path ?? opened[0]?.path ?? null)
-      const ws = prune(await api.getWorkspaces(), opened)
+      let ws = prune(await api.getWorkspaces(), opened)
+      // Collapsed groups used to be kept in local storage; they're saved with the groups now.
+      try {
+        const old = localStorage.getItem('odysseus.collapsedWorkspaces')
+        if (old) {
+          const ids: string[] = JSON.parse(old)
+          ws = ws.map((w) => (ids.includes(w.id) ? { ...w, collapsed: true } : w))
+          api.setWorkspaces(ws)
+          localStorage.removeItem('odysseus.collapsedWorkspaces')
+        }
+      } catch {
+        /* storage unavailable */
+      }
       stateRef.current.workspaces = ws
       setWorkspacesState(ws)
       setAppSettings(s)
+      if ((await api.getAiPane()).open) setTermOpen(true)
       setBooting(false)
     })()
   }, [])
@@ -257,22 +270,10 @@ function Shell() {
     if (w && active && w.lastActive !== active) saveWorkspaces(workspaces.map((x) => (x.id === w.id ? { ...x, lastActive: active } : x)))
   }, [active, workspaces, saveWorkspaces])
 
-  // Workspace groups the user collapsed in the tab row; every other group stays expanded.
-  const [collapsedWs, setCollapsedWs] = useState<string[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem('odysseus.collapsedWorkspaces') ?? '[]')
-    } catch {
-      return []
-    }
-  })
-  const setCollapsed = (ids: string[]) => {
-    setCollapsedWs(ids)
-    try {
-      localStorage.setItem('odysseus.collapsedWorkspaces', JSON.stringify(ids))
-    } catch {
-      /* storage unavailable */
-    }
-  }
+  // Workspace groups the user collapsed in the tab row (saved with the groups); the others stay expanded.
+  const collapsedWs = workspaces.filter((w) => w.collapsed).map((w) => w.id)
+  const setCollapsed = (id: string, collapsed: boolean) =>
+    saveWorkspaces(stateRef.current.workspaces.map((w) => (w.id === id ? { ...w, collapsed: collapsed || undefined } : w)))
 
   const openWorkspace = useCallback((w: Workspace) => {
     const { tabs: cur } = stateRef.current
@@ -705,11 +706,11 @@ function Shell() {
           onClose={closeTab}
           collapsed={collapsedWs}
           onOpenGroup={(w) => {
-            setCollapsed(collapsedWs.filter((id) => id !== w.id))
+            setCollapsed(w.id, false)
             openWorkspace(w)
           }}
           onCollapseGroup={(w) => {
-            setCollapsed([...collapsedWs, w.id])
+            setCollapsed(w.id, true)
             if (stateRef.current.active && wsOf([w], stateRef.current.active)) {
               setActive(null)
               persist(stateRef.current.tabs, null)
@@ -741,10 +742,10 @@ function Shell() {
         />
       ))}
       </div>
-      {termUsed && <TerminalPane ref={termRef} scopes={scopes} live={liveScopes} onAiStates={(s, n) => {
+      {termUsed && <TerminalPane ref={termRef} scopes={scopes} live={liveScopes} ready={!booting} onAiStates={(s, n) => {
             setAiStates(s)
             setAiWorking(n)
-          }} appSettings={appSettings} onSettings={setAppSettings} open={termOpen && !!activeTab} onClose={() => setTermOpen(false)} />}
+          }} appSettings={appSettings} onSettings={setAppSettings} open={termOpen && !!activeTab} wanted={termOpen} onClose={() => setTermOpen(false)} />}
       </div>
 
       {aboutOpen && <AboutDialog onClose={() => setAboutOpen(false)} />}

@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
-import type { HistoryEntry, RepoSummary, Settings, Workspace } from '@shared/types'
+import type { AiPaneState, HistoryEntry, RepoSummary, Settings, Workspace } from '@shared/types'
 
 interface StoreData {
   settings: Settings
@@ -14,6 +14,8 @@ interface StoreData {
   hidden: Record<string, string[]>
   /** Tab groups */
   workspaces: Workspace[]
+  /** AI pane sessions, restored on launch */
+  aiPane: AiPaneState
 }
 
 const DEFAULTS: StoreData = {
@@ -43,7 +45,8 @@ const DEFAULTS: StoreData = {
   tabs: [],
   activeTab: null,
   hidden: {},
-  workspaces: []
+  workspaces: [],
+  aiPane: { open: false, sessions: [], active: {} }
 }
 
 let data: StoreData = structuredClone(DEFAULTS)
@@ -119,7 +122,8 @@ export function getTabs(): { tabs: RepoSummary[]; active: string | null } {
   const tabs = (data.tabs ?? []).filter((p) => existsSync(p)).map((p) => ({ path: p, name: basename(p) }))
   // Upgrade path from single-repo versions
   if (!tabs.length && data.lastRepo && existsSync(data.lastRepo)) tabs.push({ path: data.lastRepo, name: basename(data.lastRepo) })
-  const active = tabs.some((t) => t.path === data.activeTab) ? data.activeTab : tabs[0]?.path ?? null
+  // No active tab (a collapsed workspace hid it) stays that way, showing the start page.
+  const active = tabs.some((t) => t.path === data.activeTab) ? data.activeTab : data.activeTab === null && data.tabs?.length ? null : tabs[0]?.path ?? null
   return { tabs, active }
 }
 
@@ -135,6 +139,15 @@ export function getWorkspaces(): Workspace[] {
 
 export function setWorkspaces(ws: Workspace[]): void {
   data.workspaces = ws
+  save()
+}
+
+export function getAiPane(): AiPaneState {
+  return data.aiPane ?? DEFAULTS.aiPane
+}
+
+export function setAiPane(pane: AiPaneState): void {
+  data.aiPane = pane
   save()
 }
 

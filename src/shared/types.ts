@@ -370,6 +370,28 @@ export interface Workspace {
   repos: string[]
   /** The tab to show when the group is picked */
   lastActive?: string
+  /** Collapsed in the tab row */
+  collapsed?: boolean
+}
+
+/** A session in the AI pane, saved so it comes back (and the AI resumes it) on the next launch. */
+export interface SavedSession {
+  /** Stable id; for Claude Code also its conversation id, so the same conversation resumes */
+  id: string
+  /** Terminal scope key: `repo:<path>` or `ws:<id>` */
+  scope: string
+  cwd: string
+  title: string
+  profile: TerminalProfile
+  remote?: boolean
+}
+
+/** The AI pane as it was left: whether it was shown, its sessions, and the one in view per scope. */
+export interface AiPaneState {
+  open: boolean
+  sessions: SavedSession[]
+  /** Session id in view, by scope key */
+  active: Record<string, string>
 }
 
 export interface EnvDiagnostics {

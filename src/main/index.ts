@@ -15,6 +15,7 @@ import {
   getHistory,
   getRecent,
   getSettings,
+  getAiPane,
   getTabs,
   getWorkspaces,
   loadStore,
@@ -22,6 +23,7 @@ import {
   setHidden,
   setSettings,
   setTabs,
+  setAiPane,
   setWorkspaces
 } from './store'
 import type { SearchQuery } from '@shared/search'
@@ -37,6 +39,7 @@ import type {
   AiState,
   StashOptions,
   TerminalProfile,
+  AiPaneState,
   Workspace
 } from '@shared/types'
 
@@ -291,6 +294,8 @@ const appApi: Record<string, Handler> = {
   setTabs: (tabs: string[], active: string | null) => setTabs(tabs, active),
   getWorkspaces: () => getWorkspaces(),
   setWorkspaces: (ws: Workspace[]) => setWorkspaces(ws),
+  getAiPane: () => getAiPane(),
+  setAiPane: (pane: AiPaneState) => setAiPane(pane),
   pickFolder: async (title?: string) => {
     const r = await dialog.showOpenDialog(win!, { properties: ['openDirectory'], title })
     return r.canceled ? null : r.filePaths[0]
@@ -341,8 +346,8 @@ const appApi: Record<string, Handler> = {
   }),
   showInFolder: (p: string) => shell.showItemInFolder(p),
   cancelRun: (id: string) => runner.cancel(id),
-  termCreate: (cwd: string, cols: number, rows: number, profile: TerminalProfile) =>
-    terminals.create(cwd, cols, rows, buildEnv(getSettings()), profile, getSettings().terminalShell),
+  termCreate: (cwd: string, cols: number, rows: number, profile: TerminalProfile, sessionId?: string) =>
+    terminals.create(cwd, cols, rows, buildEnv(getSettings()), profile, getSettings().terminalShell, sessionId),
   termWrite: (id: number, data: string) => terminals.write(id, data),
   termResize: (id: number, cols: number, rows: number) => terminals.resize(id, cols, rows),
   termKill: (id: number) => terminals.kill(id),

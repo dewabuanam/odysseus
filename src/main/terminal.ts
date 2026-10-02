@@ -1,8 +1,8 @@
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import type { IPty } from 'node-pty'
-import type { TerminalProfile } from '@shared/types'
+import { programOf, type TerminalProfile } from '@shared/types'
 import { which } from './env'
 
 /**
@@ -59,6 +59,27 @@ function cliDirs(): string[] {
   return dirs
 }
 
+/** Whether Claude Code has saved conversation `id` (under any project folder). */
+function claudeHasSession(id: string, env: NodeJS.ProcessEnv): boolean {
+  const projects = join(env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), 'projects')
+  try {
+    return readdirSync(projects).some((d) => existsSync(join(projects, d, `${id}.jsonl`)))
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Claude Code sessions of the pane each keep their own conversation: the first start names it
+ * with `--session-id`, later starts (after a restart of Odysseus) pick it up with `--resume`.
+ * A command that already picks a conversation is left as it is.
+ */
+export function withClaudeSession(command: string, id: string | undefined, env: NodeJS.ProcessEnv): string {
+  if (!id || programOf(command) !== 'claude' || !/^[0-9a-f-]{36}$/i.test(id)) return command
+  if (/\s(--resume|-r|--continue|-c|--session-id|-p|--print)(\s|=|$)/.test(command)) return command
+  return `${command} ${claudeHasSession(id, env) ? '--resume' : '--session-id'} ${id}`
+}
+
 const shellKind = (exe: string) => {
   const base = exe.toLowerCase().split(/[\\/]/).pop() ?? ''
   return /^(pwsh|powershell)(\.exe)?$/.test(base) ? 'pwsh' : /^cmd(\.exe)?$/.test(base) ? 'cmd' : 'posix'
@@ -81,7 +102,7 @@ export class TerminalService {
    * and the shell stays open when the program exits. A program that isn't installed yet is
    * installed first with its official install command.
    */
-  create(cwd: string, cols: number, rows: number, env: NodeJS.ProcessEnv, profile: TerminalProfile, shell: string): number {
+  create(cwd: string, cols: number, rows: number, env: NodeJS.ProcessEnv, profile: TerminalProfile, shell: string, sessionId?: string): number {
     const p = loadPty()
     const exe = shell.trim() || defaultShell()
     const kind = shellKind(exe)
@@ -96,7 +117,7 @@ export class TerminalService {
     const parts = (termEnv[pathKey] ?? '').split(delimiter).filter(Boolean)
     termEnv[pathKey] = [...cliDirs().filter((d) => !parts.includes(d)), ...parts].join(delimiter)
 
-    let command = profile.command.trim()
+    let command = withClaudeSession(profile.command.trim(), sessionId, termEnv)
     if (command) {
       const program = command.split(/\s+/)[0]
       const install = profile.install ?? KNOWN_INSTALLS[program.toLowerCase()]
