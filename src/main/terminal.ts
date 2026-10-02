@@ -109,7 +109,10 @@ export class TerminalService {
       }
     }
 
-    const args: string[] = []
+    // npm installs CLIs (codex, gemini, copilot) with .ps1 launchers, which Windows' default
+    // "Restricted" policy refuses to run. RemoteSigned, for this session only, runs local
+    // scripts and still blocks unsigned downloaded ones; the system setting is untouched.
+    const args: string[] = kind === 'pwsh' && isWin ? ['-ExecutionPolicy', 'RemoteSigned'] : []
     if (command) {
       if (kind === 'pwsh') args.push('-NoLogo', '-NoExit', '-Command', command)
       else if (kind === 'cmd') args.push('/K', command)
