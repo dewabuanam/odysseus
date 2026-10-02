@@ -328,20 +328,26 @@ function Shell() {
     api.setAiStatus(overallAi)
   }, [overallAi])
 
+  /** Runs `fn` once the pane has mounted (the first open mounts it), instead of guessing a delay. */
+  const withPane = (fn: (h: TerminalHandle) => void, tries = 60) => {
+    if (termRef.current) fn(termRef.current)
+    else if (tries > 0) setTimeout(() => withPane(fn, tries - 1), 50)
+  }
+
   /** Shows the pane and starts a session: the given program, or the default AI. */
   const openTerminal = (profile?: { name: string; command: string }, w?: Workspace) => {
     if (w && !wsOf([w], stateRef.current.active)) openWorkspace(w)
     setTermUsed(true)
     setTermOpen(true)
     // Let the pane mount (and pick up the new scope) before starting.
-    setTimeout(() => termRef.current?.start(profile, w ? 'workspace' : undefined), 30)
+    setTimeout(() => withPane((h) => h.start(profile, w ? 'workspace' : undefined)), 30)
   }
 
   const toggleTerminal = () => {
     if (termOpen) return setTermOpen(false)
     setTermUsed(true)
     setTermOpen(true)
-    setTimeout(() => termRef.current?.ensure(), 30)
+    setTimeout(() => withPane((h) => h.ensure()), 30)
   }
 
   // ------------------------------------------------------------ commands + shortcuts
