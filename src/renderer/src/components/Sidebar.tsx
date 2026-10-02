@@ -225,17 +225,20 @@ function SubmoduleSection() {
  * the graph). Branches whose tip isn't in the loaded graph get a grey dotted line.
  */
 function BranchMark({ lane, current = false, dotted = false }: { lane?: number; current?: boolean; dotted?: boolean }) {
-  const color = lane === undefined ? 'var(--ink-3)' : `var(--lane-${lane})`
+  // Grey until hovered, selected or checked out (see .branch-mark in styles.css).
   const dash = dotted || lane === undefined ? '2.5 2' : undefined
   return (
-    <svg width="14" height="22" viewBox="0 0 14 22" className="branch-mark" aria-hidden>
-      <line x1="7" y1="0" x2="7" y2="22" stroke={color} strokeWidth="2" strokeDasharray={dash} opacity={0.85} />
-      <circle cx="7" cy="11" r={current ? 4 : 3.4} fill={current ? color : 'var(--paper-2)'} stroke={color} strokeWidth="1.8" />
+    <svg width="14" height="22" viewBox="0 0 14 22" className="branch-mark" aria-hidden style={lane === undefined ? undefined : ({ '--mark': `var(--lane-${lane})` } as React.CSSProperties)}>
+      <line x1="7" y1="0" x2="7" y2="22" stroke="currentColor" strokeWidth="2" strokeDasharray={dash} opacity={0.85} />
+      <circle cx="7" cy="11" r={current ? 4 : 3.4} fill={current ? 'currentColor' : 'var(--paper-2)'} stroke="currentColor" strokeWidth="1.8" />
     </svg>
   )
 }
 
-/** A branch name drawn like its label in the commit graph: same color, filled when checked out, dashed for remotes. */
+/**
+ * A branch name that turns into its commit-graph label (same color, filled when checked out,
+ * dashed for remotes) on hover, when selected, and for the checked-out branch. Plain otherwise.
+ */
 function RefName({ name, lane, kind }: { name: string; lane?: number; kind: 'branch' | 'branch head' | 'remote' }) {
   return (
     <span className={`ref ${kind} sb-ref ellipsis`} style={lane === undefined ? undefined : ({ '--ref-lane': `var(--lane-${lane})` } as React.CSSProperties)}>

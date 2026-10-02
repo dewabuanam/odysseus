@@ -559,3 +559,13 @@ body:has(.overlay, .palette-overlay) .titlebar * { -webkit-app-region: no-drag; 
 .about-table td { padding: 2px 10px !important; }
 .about-table a, .about-links a { color: var(--ink); }
 .about-links { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; margin-top: 12px; font-size: 12.5px; }
+
+/* Sidebar branches stay plain; their graph color shows on hover, when selected and for the
+   checked-out branch only. */
+.sb-item .branch-mark { color: var(--ink-3); }
+.sb-item:hover .branch-mark, .sb-item.active .branch-mark, .sb-item.current .branch-mark { color: var(--mark, var(--ink-3)); }
+.sb-item .sb-ref { border-color: transparent; background: transparent; color: var(--ink); font-weight: 400; }
+.sb-item.current .sb-ref { font-weight: 700; }
+.sb-item:hover .sb-ref.branch, .sb-item.active .sb-ref.branch { border-color: var(--ref-lane, var(--ink)); color: var(--ref-lane, var(--ink)); }
+.sb-item:hover .sb-ref.remote, .sb-item.active .sb-ref.remote { border-color: var(--ref-lane, var(--ink)); border-style: dashed; color: var(--ref-lane, var(--ink-2)); }
+.sb-item .sb-ref.branch.head { background: var(--ref-lane, var(--ink)); border-color: var(--ref-lane, var(--ink)); color: var(--paper); }
