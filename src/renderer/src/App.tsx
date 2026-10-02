@@ -26,6 +26,36 @@ import { Welcome } from './components/Welcome'
 import { defaultProfile, TerminalPane, type TerminalHandle, type TermScope } from './components/TerminalPane'
 import { addRepos, commonFolder, newId, nextColor, prune, withoutRepos, wsOf, LANE_COUNT } from './workspaces'
 
+const AI_BADGE: Record<AiState, string> = { waiting: '#d93a32', working: '#e0a400', idle: '#2f9a4f' }
+
+/**
+ * Taskbar overlay: a dot in the most urgent state's color with the number of AI sessions
+ * still working, so "2 working, 1 waiting for you" reads as a red dot with a 2.
+ */
+function aiBadge(state: AiState, working: number): string {
+  const size = 32
+  const c = document.createElement('canvas')
+  c.width = c.height = size
+  const g = c.getContext('2d')!
+  g.beginPath()
+  g.arc(size / 2, size / 2, size / 2 - 1, 0, Math.PI * 2)
+  g.fillStyle = '#ffffff'
+  g.fill()
+  g.beginPath()
+  g.arc(size / 2, size / 2, size / 2 - 3.5, 0, Math.PI * 2)
+  g.fillStyle = AI_BADGE[state]
+  g.fill()
+  if (working > 0) {
+    const text = working > 9 ? '9+' : String(working)
+    g.fillStyle = '#ffffff'
+    g.font = `bold ${text.length > 1 ? 15 : 20}px "Segoe UI", Arial, sans-serif`
+    g.textAlign = 'center'
+    g.textBaseline = 'middle'
+    g.fillText(text, size / 2, size / 2 + 1)
+  }
+  return c.toDataURL('image/png')
+}
+
 const COLOR_NAMES = ['Red', 'Blue', 'Green', 'Orange', 'Purple', 'Teal', 'Brown', 'Pink']
 
 export function App() {
@@ -51,6 +81,7 @@ function Shell() {
   const [termOpen, setTermOpen] = useState(false)
   const [termUsed, setTermUsed] = useState(false)
   const [aiStates, setAiStates] = useState<Record<string, AiState>>({})
+  const [aiWorking, setAiWorking] = useState(0)
   const termRef = useRef<TerminalHandle>(null)
   const handles = useRef(new Map<string, TabHandle>())
   const stateRef = useRef({ tabs, active, workspaces })
@@ -325,8 +356,8 @@ function Shell() {
   const groupAi = (w: Workspace) => aggregateAi([aiStates[`ws:${w.id}`], ...w.repos.map(repoAi)])
   const overallAi = aggregateAi(Object.values(aiStates))
   useEffect(() => {
-    api.setAiStatus(overallAi)
-  }, [overallAi])
+    api.setAiStatus(overallAi, overallAi ? aiBadge(overallAi, aiWorking) : null)
+  }, [overallAi, aiWorking])
 
   /** Runs `fn` once the pane has mounted (the first open mounts it), instead of guessing a delay. */
   const withPane = (fn: (h: TerminalHandle) => void, tries = 60) => {
@@ -609,7 +640,10 @@ function Shell() {
         />
       ))}
       </div>
-      {termUsed && <TerminalPane ref={termRef} scopes={scopes} live={liveScopes} onAiStates={setAiStates} open={termOpen && !!activeTab} onClose={() => setTermOpen(false)} />}
+      {termUsed && <TerminalPane ref={termRef} scopes={scopes} live={liveScopes} onAiStates={(s, n) => {
+            setAiStates(s)
+            setAiWorking(n)
+          }} open={termOpen && !!activeTab} onClose={() => setTermOpen(false)} />}
       </div>
 
       {palette && <Palette initial={palette} onClose={() => setPalette(null)} />}

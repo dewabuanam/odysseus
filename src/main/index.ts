@@ -170,11 +170,14 @@ function dotIcon(state: AiState): Electron.NativeImage {
  * or green dot on Windows, a dock badge on macOS. Flashes the taskbar when an AI starts
  * waiting for you while Odysseus is in the background.
  */
-function setAiStatus(state: AiState | null): void {
-  if (!win || state === aiStatus) return
+function setAiStatus(state: AiState | null, badge?: string | null): void {
+  if (!win) return
   const prev = aiStatus
   aiStatus = state
-  if (process.platform === 'win32') win.setOverlayIcon(state ? dotIcon(state) : null, state ? AI_TEXT[state] : '')
+  if (process.platform === 'win32') {
+    const icon = badge ? nativeImage.createFromDataURL(badge) : state ? dotIcon(state) : null
+    win.setOverlayIcon(icon && !icon.isEmpty() ? icon : null, state ? AI_TEXT[state] : '')
+  }
   else if (process.platform === 'darwin') app.dock?.setBadge(state === 'waiting' ? '!' : state === 'working' ? '•' : '')
   if (state === 'waiting' && prev !== 'waiting' && !win.isFocused()) win.flashFrame(true)
   if (state !== 'waiting') win.flashFrame(false)
@@ -313,7 +316,7 @@ const appApi: Record<string, Handler> = {
   termWrite: (id: number, data: string) => terminals.write(id, data),
   termResize: (id: number, cols: number, rows: number) => terminals.resize(id, cols, rows),
   termKill: (id: number) => terminals.kill(id),
-  setAiStatus: (state: AiState | null) => setAiStatus(state),
+  setAiStatus: (state: AiState | null, badge?: string | null) => setAiStatus(state, badge),
   platform: () => process.platform,
   windowMinimize: () => win?.minimize(),
   windowToggleMaximize: () => (win?.isMaximized() ? win.unmaximize() : win?.maximize()),

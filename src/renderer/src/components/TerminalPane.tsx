@@ -56,8 +56,8 @@ interface Props {
   live: string[]
   open: boolean
   onClose(): void
-  /** Most urgent AI state per scope key, whenever any session's state changes */
-  onAiStates(states: Record<string, AiState>): void
+  /** Most urgent AI state per scope key, and how many sessions are working, on every change */
+  onAiStates(states: Record<string, AiState>, working: number): void
   ref?: Ref<TerminalHandle>
 }
 
@@ -142,7 +142,7 @@ export function TerminalPane({ scopes, live, open, onClose, onAiStates, ref }: P
       const a = aggregateAi([out[s.scope], s.ai])
       if (a) out[s.scope] = a
     }
-    onAiStatesRef.current(out)
+    onAiStatesRef.current(out, sessions.filter((s) => s.ai === 'working').length)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aiKey])
 
