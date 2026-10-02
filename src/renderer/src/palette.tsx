@@ -12,6 +12,8 @@ export interface Cmd {
   when?: boolean
   /** The git command this option runs, shown on the right. */
   cmdline?: string
+  /** Fixed rank: higher sorts first, and wins ties when typing. Unranked items keep list order. */
+  priority?: number
   run(): void | Step | Promise<void | Step>
 }
 
@@ -123,47 +125,6 @@ function Highlight({ text, hits }: { text: string; hits: number[] }) {
   return <>{out}</>
 }
 
-// ------------------------------------------------------------------ recents
-
-// ------------------------------------------------------------------ usage ranking
-
-/**
- * "Frecency": how often and how recently each item was chosen. Keyed per step, so the push
- * option or branch you pick most rises to the top of that list, not just top-level commands.
- */
-const USAGE_KEY = 'odysseus.palette.usage'
-type Usage = Record<string, { n: number; t: number }>
-let usageCache: Usage | null = null
-
-function loadUsage(): Usage {
-  if (usageCache) return usageCache
-  try {
-    usageCache = JSON.parse(localStorage.getItem(USAGE_KEY) ?? '{}')
-  } catch {
-    usageCache = {}
-  }
-  return usageCache!
-}
-
-export function recordUsage(key: string) {
-  const u = loadUsage()
-  const e = u[key] ?? { n: 0, t: 0 }
-  u[key] = { n: e.n + 1, t: Date.now() }
-  try {
-    localStorage.setItem(USAGE_KEY, JSON.stringify(u))
-  } catch {
-    /* storage unavailable */
-  }
-}
-
-export function usageScore(key: string): number {
-  const e = loadUsage()[key]
-  if (!e) return 0
-  const days = (Date.now() - e.t) / 86_400_000
-  const recency = days < 1 ? 4 : days < 7 ? 2 : days < 30 ? 1 : 0.5
-  return Math.log2(1 + e.n) * 3 + recency
-}
-
 // ------------------------------------------------------------------ component
 
 const MAX_RENDERED = 150
@@ -184,31 +145,25 @@ export function Palette({ initial, onClose }: { initial: Step; onClose(): void }
   const isRoot = stack.length === 1
   const crumbs = stack.map((s) => s.crumb).filter(Boolean) as string[]
 
-  const scope = crumbs.join(' › ') || 'root'
-  const usageKey = (c: Cmd) => `${scope}|${c.id}`
-
   const results = useMemo(() => {
     if (step.kind !== 'list') return []
     const items = step.items.filter((c) => c.when !== false)
+    const rank = (c: Cmd) => c.priority ?? 0
     if (!typed.trim()) {
-      // Most-used first; ties keep the list's own order (stable sort).
-      return items
-        .map((c, i) => ({ c, hits: [] as number[], u: usageScore(usageKey(c)), i }))
-        .sort((a, b) => b.u - a.u || a.i - b.i)
+      // Static priority first; ties keep the list's own order (stable sort).
+      return items.map((c) => ({ c, hits: [] as number[] })).sort((a, b) => rank(b.c) - rank(a.c))
     }
     const scored: { c: Cmd; hits: number[]; score: number }[] = []
     for (const c of items) {
-      const bonus = Math.min(usageScore(usageKey(c)), 12)
       const m = fuzzy(typed, c.title)
-      if (m) scored.push({ c, hits: m.hits, score: m.score + bonus })
+      if (m) scored.push({ c, hits: m.hits, score: m.score + rank(c) })
       else {
         const d = fuzzy(typed, `${c.detail ?? ''} ${c.cmdline ?? ''}`)
-        if (d) scored.push({ c, hits: [], score: d.score - 5 + bonus })
+        if (d) scored.push({ c, hits: [], score: d.score - 5 + rank(c) })
       }
     }
     return scored.sort((a, b) => b.score - a.score)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step, typed, scope])
+  }, [step, typed])
 
   const suggestions = useMemo(() => {
     if (step.kind !== 'input' || !step.suggestions) return []
@@ -251,7 +206,6 @@ export function Palette({ initial, onClose }: { initial: Step; onClose(): void }
   }
 
   const choose = (c: Cmd) => {
-    recordUsage(usageKey(c))
     advance(c.run(), crumbOf(c.title))
   }
 

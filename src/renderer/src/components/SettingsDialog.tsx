@@ -7,12 +7,14 @@ import { Modal } from '../ui'
 export function SettingsDialog({ onClose, onSaved }: { onClose(): void; onSaved(s: Settings): void }) {
   const [s, setS] = useState<Settings | null>(null)
   const [pathText, setPathText] = useState('')
+  const [profilesText, setProfilesText] = useState('')
   const [diag, setDiag] = useState<EnvDiagnostics | null>(null)
 
   useEffect(() => {
     api.getSettings().then((v) => {
       setS(v)
       setPathText(v.extraPath.join('\n'))
+      setProfilesText((v.terminalProfiles ?? []).map((p) => `${p.name} = ${p.command}`).join('\n'))
     })
     api.diagnostics().then(setDiag)
   }, [])
@@ -20,7 +22,15 @@ export function SettingsDialog({ onClose, onSaved }: { onClose(): void; onSaved(
   if (!s) return null
 
   const save = async () => {
-    const saved = await api.setSettings({ ...s, extraPath: pathText.split('\n').map((p) => p.trim()).filter(Boolean) })
+    const terminalProfiles = profilesText
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .map((l) => {
+        const eq = l.indexOf('=')
+        return eq > 0 ? { name: l.slice(0, eq).trim(), command: l.slice(eq + 1).trim() } : { name: l, command: l }
+      })
+    const saved = await api.setSettings({ ...s, extraPath: pathText.split('\n').map((p) => p.trim()).filter(Boolean), terminalProfiles })
     onSaved(saved)
     setDiag(await api.diagnostics())
   }
@@ -75,6 +85,21 @@ export function SettingsDialog({ onClose, onSaved }: { onClose(): void; onSaved(
               <option key={k} value={k}>{KEYMAP_NAMES[k]}</option>
             ))}
           </select>
+        </div>
+      </div>
+
+      <div className="section-head">Terminal pane</div>
+      <div className="dim" style={{ fontSize: 12, margin: '6px 0 10px' }}>
+        The terminal pane opens in the repository folder. Programs run inside the shell, so anything on your PATH works (for example Claude Code: <code>claude</code>).
+      </div>
+      <div className="row" style={{ gap: 12 }}>
+        <div className="field" style={{ width: 260 }}>
+          <span>Shell</span>
+          <input className="input" value={s.terminalShell ?? ''} placeholder="Default: PowerShell, or $SHELL" onChange={(e) => setS({ ...s, terminalShell: e.target.value })} />
+        </div>
+        <div className="field grow">
+          <span>Programs (one per line: Name = command)</span>
+          <textarea className="textarea mono" rows={3} value={profilesText} placeholder={'Claude Code = claude\nCodex = codex'} onChange={(e) => setProfilesText(e.target.value)} />
         </div>
       </div>
 

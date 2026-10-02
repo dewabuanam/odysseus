@@ -1,7 +1,7 @@
 import { app } from 'electron'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
-import type { HistoryEntry, RepoSummary, Settings } from '@shared/types'
+import type { HistoryEntry, RepoSummary, Settings, Workspace } from '@shared/types'
 
 interface StoreData {
   settings: Settings
@@ -12,6 +12,8 @@ interface StoreData {
   activeTab: string | null
   /** Hidden branch refs per repository */
   hidden: Record<string, string[]>
+  /** Tab groups */
+  workspaces: Workspace[]
 }
 
 const DEFAULTS: StoreData = {
@@ -22,13 +24,22 @@ const DEFAULTS: StoreData = {
     hookTimeoutSec: 0,
     gitPath: 'git',
     theme: 'light',
-    keymap: 'default'
+    keymap: 'default',
+    terminalShell: '',
+    terminalProfiles: [
+      { name: 'Claude Code', command: 'claude' },
+      { name: 'Codex', command: 'codex' },
+      { name: 'Gemini', command: 'gemini' },
+      { name: 'Copilot', command: 'copilot' }
+    ],
+    terminalDefault: 'Claude Code'
   },
   recentRepos: [],
   lastRepo: null,
   tabs: [],
   activeTab: null,
-  hidden: {}
+  hidden: {},
+  workspaces: []
 }
 
 let data: StoreData = structuredClone(DEFAULTS)
@@ -111,6 +122,15 @@ export function getTabs(): { tabs: RepoSummary[]; active: string | null } {
 export function setTabs(tabs: string[], active: string | null): void {
   data.tabs = tabs
   data.activeTab = active
+  save()
+}
+
+export function getWorkspaces(): Workspace[] {
+  return data.workspaces ?? []
+}
+
+export function setWorkspaces(ws: Workspace[]): void {
+  data.workspaces = ws
   save()
 }
 

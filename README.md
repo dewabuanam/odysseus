@@ -53,6 +53,10 @@ Before installing anything, `setup.exe` looks for Git 2.36 or newer (on `PATH`, 
 
 Silent installs (`setup.exe /S`) do the same without prompts and exit if Git can't be installed.
 
+### The installer and AI tools
+
+After installing the app, setup checks for the AI command-line tools the AI pane runs: **Claude Code** (`claude`), **Codex**, **Gemini** and **GitHub Copilot CLI**. It lists the missing ones and asks before installing them for your user account: Claude Code with its official installer from claude.ai, the others with npm (they need Node.js and are skipped without it). Nothing here stops setup. A tool that's still missing is installed the first time you open it in the AI pane.
+
 ### Code signing
 
 The Windows builds are signed with a **self-signed** Odysseus certificate (thumbprint `8BA7F8403BDBDB07C8ADA30688B5D1FE6293C9D1`). It isn't issued by a public certificate authority, so until you trust it, Windows shows the publisher as unknown. To trust it for your Windows account, download `odysseus-codesign.cer` and `install-certificate.ps1` from the release into one folder and run:
@@ -85,13 +89,25 @@ Only trust a certificate if you trust where it came from. You can always skip th
 
 ![Push options in the palette](docs/screenshots/palette.png)
 
-Press **Ctrl+P**. Every action lives there, with fuzzy matching (`chk` finds *Checkout*). Choosing a command shows its options with the exact git command next to each, before anything runs: push with or without upstream, force-with-lease, no-verify, tags; pull by merge, rebase or fast-forward; merge with `--no-ff`, `--ff-only` or `--squash`. Inputs come pre-filled: your draft commit message with conventional-commit prefixes, the next semantic version for a tag, `feature/` and `fix/` for branch names. Arrow keys fill the input from the suggestions, Tab completes, Backspace steps back. The commands and options you use most rise to the top.
+Press **Ctrl+P**. Every action lives there, with fuzzy matching (`chk` finds *Checkout*). Choosing a command shows its options with the exact git command next to each, before anything runs: push with or without upstream, force-with-lease, no-verify, tags; pull by merge, rebase or fast-forward; merge with `--no-ff`, `--ff-only` or `--squash`. Inputs come pre-filled: your draft commit message with conventional-commit prefixes, the next semantic version for a tag, `feature/` and `fix/` for branch names. Arrow keys fill the input from the suggestions, Tab completes, Backspace steps back. Commands keep a fixed order with the everyday ones first (pull, push, commit, AI, fetch, checkout), so typing `p` always offers *Pull* first, then *Push*.
 
 ### Tabs and a command queue
 
 - Open any number of repositories in **tabs** on their own row. Tabs that don't fit go into the **▾** menu next to **+**; picking one from there moves it into the visible row (the last visible tab moves into the menu). Tab order is restored on launch.
 - **Every git command is queued per repository** and runs strictly in order. Pull, checkout another branch, pull, checkout, pull: fire them as fast as you like and they run in exactly that sequence, never two at once. Queued commands show in the console with a button to drop them.
 - **Command history** of every command, its output, exit code and failing hook, kept across restarts (Ctrl+H).
+
+### Workspaces
+
+Group tabs into **workspaces**, like browser tab groups. Each workspace is a colored chip in the tab row. The workspace holding the current tab is expanded and shows all its tabs; every other workspace collapses to its chip. Click a chip to switch to that workspace, at the tab you last used there.
+
+- **Workspace: New from Folder** opens every repository in a folder (or the folder itself) as one group. Right-click a tab to add it to a workspace or take it out.
+- Right-click a chip to rename it, change its color or folder, open the AI there, ungroup, or close the workspace with its tabs.
+- Each workspace has a **folder** (by default the folder its repositories live in). The AI pane can start there, so one AI session can see every repository in the workspace.
+
+### AI and terminal pane
+
+The **Claude Code** button in the title bar (or **AI: Open** in the palette, or Ctrl+Shift+T) opens a pane on the right with your AI coding tool running in the current repository, or in the workspace folder when the tab belongs to a workspace (switch with **Workspace / Repository**). Sessions are real terminals and keep running while the pane is hidden. Start more from the pane: your default AI, Codex, Gemini, Copilot, or a plain PowerShell. The default AI, the shell and the list of programs are in **Settings > Terminal pane** and **Preferences: Default AI** in the palette. A program that isn't installed yet is installed with its official command the first time you start it.
 
 ### Context menus
 
@@ -102,7 +118,7 @@ Right-click a commit or a branch for full context menus: checkout, delete, renam
 ### Everything else
 
 - **Stage by file, hunk or line** with buttons. The UI updates instantly and git confirms right after.
-- **Conflicts**: merge, rebase and cherry-pick conflicts with the ours and theirs regions marked, *use ours* / *use theirs*, *mark resolved*, abort and continue.
+- **Conflict resolver**: when a merge, rebase, pull, cherry-pick or stash stops on conflicts, a window opens with every conflicted file. Each conflict shows both sides next to each other; pick one side, both in either order, or edit the merged result by hand, then save and mark it resolved. Binary and deleted-on-one-side files offer keeping a version or deleting. When the last file is done, continue the operation from the same window.
 - **Submodules**, nested ones included: state at a glance, open in a tab, update, add, sync, deinit, and pull or fetch recursively.
 - **Stashes, tags, remotes**, fetch / pull / push with upstream setup.
 - **Recovery prompts**: when local changes block a command, stash them, retry, and restore them; when git has no author identity, set it in two keystrokes.
@@ -161,6 +177,7 @@ The default shortcuts are below. **Settings > Keymap** switches to **VS Code**, 
 | Ctrl+Tab / Ctrl+Shift+Tab / Ctrl+1..9 | Next / previous / nth tab |
 | Ctrl+\` / Ctrl+\\ | Toggle console / sidebar |
 | Ctrl+, | Settings |
+| Ctrl+Shift+T | Toggle the AI / terminal pane |
 | F5 | Refresh |
 
 ## Building from source

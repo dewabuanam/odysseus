@@ -1,10 +1,11 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } from 'electron'
-import { existsSync, watch, type FSWatcher } from 'node:fs'
+import { existsSync, readdirSync, watch, type FSWatcher } from 'node:fs'
 import { join } from 'node:path'
 import { buildEnv, diagnostics, envPath, initEnv } from './env'
 import { GitRepo, type DiffSource } from './git/repo'
 import { HookService } from './git/hooks'
 import { GitRunner } from './git/runner'
+import { TerminalService } from './terminal'
 import {
   addHistory,
   addRecent,
@@ -14,11 +15,13 @@ import {
   getRecent,
   getSettings,
   getTabs,
+  getWorkspaces,
   loadStore,
   removeRecent,
   setHidden,
   setSettings,
-  setTabs
+  setTabs,
+  setWorkspaces
 } from './store'
 import type { SearchQuery } from '@shared/search'
 import type {
@@ -30,7 +33,9 @@ import type {
   PullOptions,
   RepoSummary,
   Settings,
-  StashOptions
+  StashOptions,
+  TerminalProfile,
+  Workspace
 } from '@shared/types'
 
 let win: BrowserWindow | null = null
@@ -104,6 +109,29 @@ const runner = new GitRunner({
         })
       }
     }
+  }
+})
+
+// ------------------------------------------------------------------ terminal pane
+
+// Like hook output, terminal output is batched per session before crossing IPC.
+const termBuffers = new Map<number, string>()
+let termTimer: NodeJS.Timeout | null = null
+function flushTerm(): void {
+  termTimer = null
+  for (const [id, data] of termBuffers) send('termData', { id, data })
+  termBuffers.clear()
+}
+
+const terminals = new TerminalService({
+  data: (id, data) => {
+    termBuffers.set(id, (termBuffers.get(id) ?? '') + data)
+    termTimer ??= setTimeout(flushTerm, 8)
+  },
+  exit: (id, code) => {
+    if (termTimer) clearTimeout(termTimer)
+    flushTerm()
+    send('termExit', { id, code })
   }
 })
 
@@ -193,6 +221,23 @@ const appApi: Record<string, Handler> = {
   removeRecent: (p: string) => removeRecent(p),
   getTabs: () => getTabs(),
   setTabs: (tabs: string[], active: string | null) => setTabs(tabs, active),
+  getWorkspaces: () => getWorkspaces(),
+  setWorkspaces: (ws: Workspace[]) => setWorkspaces(ws),
+  pickFolder: async (title?: string) => {
+    const r = await dialog.showOpenDialog(win!, { properties: ['openDirectory'], title })
+    return r.canceled ? null : r.filePaths[0]
+  },
+  /** Git repositories in a folder: the folder itself, or the ones directly inside it. */
+  scanRepos: (folder: string) => {
+    if (existsSync(join(folder, '.git'))) return [folder]
+    try {
+      return readdirSync(folder, { withFileTypes: true })
+        .filter((d) => d.isDirectory() && existsSync(join(folder, d.name, '.git')))
+        .map((d) => join(folder, d.name))
+    } catch {
+      return []
+    }
+  },
   pickRepo: async () => {
     const r = await dialog.showOpenDialog(win!, { properties: ['openDirectory'] })
     return r.canceled ? null : r.filePaths[0]
@@ -218,6 +263,11 @@ const appApi: Record<string, Handler> = {
   openExternal: (p: string) => shell.openPath(p),
   showInFolder: (p: string) => shell.showItemInFolder(p),
   cancelRun: (id: string) => runner.cancel(id),
+  termCreate: (cwd: string, cols: number, rows: number, profile: TerminalProfile) =>
+    terminals.create(cwd, cols, rows, buildEnv(getSettings()), profile, getSettings().terminalShell),
+  termWrite: (id: number, data: string) => terminals.write(id, data),
+  termResize: (id: number, cols: number, rows: number) => terminals.resize(id, cols, rows),
+  termKill: (id: number) => terminals.kill(id),
   platform: () => process.platform,
   windowMinimize: () => win?.minimize(),
   windowToggleMaximize: () => (win?.isMaximized() ? win.unmaximize() : win?.maximize()),
@@ -243,6 +293,7 @@ const repoApi: Record<string, RepoHandler> = {
   remotes: ({ repo }) => repo.remotes(),
   lastCommitMessage: ({ repo }) => repo.lastCommitMessage(),
   conflictContent: ({ repo }, path: string) => repo.conflictContent(path),
+  conflictSides: ({ repo }, path: string) => repo.conflictSides(path),
   getHidden: ({ repo }) => getHidden(repo.root),
   identity: ({ repo }) => repo.identity(),
   setIdentity: ({ repo }, name: string, email: string, global: boolean) => repo.setIdentity(name, email, global),
@@ -257,6 +308,7 @@ const repoApi: Record<string, RepoHandler> = {
   applyHunk: ({ repo }, file: FileDiff, hunk: number, lines: number[] | null, mode: 'stage' | 'unstage' | 'discard') =>
     repo.applyHunk(file, hunk, lines, mode),
   resolveConflict: ({ repo }, path: string, side: 'ours' | 'theirs') => repo.resolveConflict(path, side),
+  saveResolution: ({ repo }, path: string, content: string) => repo.saveResolution(path, content),
 
   // commands (queued, hook-aware, recorded in history)
   commit: ({ repo }, o) => repo.commit(o),
@@ -359,6 +411,7 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', () => {
   runner.cancelAll()
+  terminals.killAll()
   for (const root of [...open.keys()]) unregister(root)
 })
 

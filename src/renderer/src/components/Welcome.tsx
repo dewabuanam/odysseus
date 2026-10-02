@@ -5,7 +5,7 @@ import { useUi } from '../ui'
 import { formatKeys } from '../palette'
 import logo from '../assets/logo.png'
 
-export function Welcome({ onOpen }: { onOpen(dir: string): void }) {
+export function Welcome({ onOpen, onWorkspace }: { onOpen(dir: string): void; onWorkspace(): void }) {
   const ui = useUi()
   const [recent, setRecent] = useState<RepoSummary[]>([])
   const [busy, setBusy] = useState(false)
@@ -37,6 +37,7 @@ export function Welcome({ onOpen }: { onOpen(dir: string): void }) {
             Open repository
           </button>
           <button className="btn" disabled={busy} onClick={() => guard(api.initRepo)}>New repository</button>
+          <button className="btn" disabled={busy} onClick={onWorkspace} title="Open every repository in a folder as one tab group">Open workspace folder</button>
           <button
             className="btn"
             disabled={busy}

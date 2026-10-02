@@ -36,6 +36,7 @@ export const DEFAULT_KEYS: Bindings = {
   'view.history': ['Mod+H'],
   'view.console': ['Mod+`'],
   'view.sidebar': ['Mod+\\'],
+  'view.terminal': ['Mod+Shift+`', 'Mod+Shift+T'],
   'view.refresh': ['F5'],
   'app.settings': ['Mod+,'],
   'app.shortcuts': ['Mod+/']

@@ -27,6 +27,7 @@ import { HookConsole } from './components/HookConsole'
 import { HooksView } from './components/HooksView'
 import { Sidebar } from './components/Sidebar'
 import { WorkingPanel } from './components/WorkingPanel'
+import { ConflictResolver } from './components/ConflictResolver'
 
 const ALL: RefreshScope[] = ['status', 'refs', 'hooks']
 
@@ -71,6 +72,7 @@ export function RepoView({ tab, active, openRepo, closeTab, openPalette, openSet
   const [view, setView] = useState<'history' | 'hooks'>('history')
   const [hookSel, setHookSel] = useState<string>('pre-commit')
   const [consoleOpen, setConsoleOpen] = useState(false)
+  const [resolver, setResolver] = useState<{ path?: string } | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [listWidth, setListWidth] = useState(46)
   const [query, setQuery] = useState('')
@@ -185,6 +187,17 @@ export function RepoView({ tab, active, openRepo, closeTab, openPalette, openSet
   }, [hidden, onlyRef])
 
   useEffect(() => onInfo(tab.path, { status, superproject }), [status, superproject, tab.path, onInfo])
+
+  // Open the resolver as soon as a merge, rebase, pull or stash stops on conflicts.
+  const conflictCount = status?.conflicted.length ?? 0
+  const prevConflicts = useRef<number | null>(null)
+  useEffect(() => {
+    if (status === null) return
+    if (prevConflicts.current !== null && prevConflicts.current === 0 && conflictCount > 0 && activeRef.current) setResolver({})
+    prevConflicts.current = conflictCount
+  }, [conflictCount, status])
+
+  const resolveConflicts = useCallback((path?: string) => setResolver({ path }), [])
 
   // Auto-open the console as soon as a hook starts in this repository.
   useEffect(
@@ -352,6 +365,7 @@ export function RepoView({ tab, active, openRepo, closeTab, openPalette, openSet
     commitAction,
     toggleConsole: () => setConsoleOpen((o) => !o),
     toggleSidebar: () => setSidebarOpen((o) => !o),
+    resolveConflicts,
     toggleTheme,
     openSettings,
     refresh: () => refreshRef.current(ALL),
@@ -409,9 +423,10 @@ export function RepoView({ tab, active, openRepo, closeTab, openPalette, openSet
       openConsole: () => setConsoleOpen(true),
       select,
       branchMenu: (e, b) => ui.menu(e, branchMenu(depsRef.current, b)),
-      openPalette
+      openPalette,
+      resolveConflicts
     }),
-    [tab.path, status, branches, tags, stashes, remotes, hooks, submodules, superproject, hidden, openRepo, refresh, exec, mutate, select, ui, openPalette]
+    [tab.path, status, branches, tags, stashes, remotes, hooks, submodules, superproject, hidden, openRepo, refresh, exec, mutate, select, ui, openPalette, resolveConflicts]
   )
 
   return (
@@ -476,6 +491,7 @@ export function RepoView({ tab, active, openRepo, closeTab, openPalette, openSet
             <HookConsole open={consoleOpen} onToggle={setConsoleOpen} />
           </div>
         </div>
+        {resolver && active && <ConflictResolver initial={resolver.path} onClose={() => setResolver(null)} />}
       </RepoContext.Provider>
     </ApiContext.Provider>
   )

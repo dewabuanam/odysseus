@@ -24,7 +24,9 @@ import type {
   StashOptions,
   Submodule,
   Tag,
-  WorkingStatus
+  TerminalProfile,
+  WorkingStatus,
+  Workspace
 } from '@shared/types'
 
 export type DiffSource =
@@ -48,6 +50,10 @@ export const api = {
   removeRecent: (p: string) => call<void>('removeRecent', p),
   getTabs: () => call<{ tabs: RepoSummary[]; active: string | null }>('getTabs'),
   setTabs: (tabs: string[], active: string | null) => call<void>('setTabs', tabs, active),
+  getWorkspaces: () => call<Workspace[]>('getWorkspaces'),
+  setWorkspaces: (ws: Workspace[]) => call<void>('setWorkspaces', ws),
+  pickFolder: (title?: string) => call<string | null>('pickFolder', title),
+  scanRepos: (folder: string) => call<string[]>('scanRepos', folder),
   pickRepo: () => call<string | null>('pickRepo'),
   openRepo: (dir: string) => call<RepoSummary>('openRepo', dir),
   closeRepo: (root: string) => call<void>('closeRepo', root),
@@ -57,6 +63,10 @@ export const api = {
   openExternal: (p: string) => call<string>('openExternal', p),
   showInFolder: (p: string) => call<void>('showInFolder', p),
   cancelRun: (id: string) => call<boolean>('cancelRun', id),
+  termCreate: (cwd: string, cols: number, rows: number, profile: TerminalProfile) => call<number>('termCreate', cwd, cols, rows, profile),
+  termWrite: (id: number, data: string) => call<void>('termWrite', id, data),
+  termResize: (id: number, cols: number, rows: number) => call<void>('termResize', id, cols, rows),
+  termKill: (id: number) => call<void>('termKill', id),
   platform: () => call<string>('platform'),
   windowMinimize: () => call<void>('windowMinimize'),
   windowToggleMaximize: () => call<void>('windowToggleMaximize'),
@@ -83,6 +93,7 @@ export function repoApi(root: string) {
     remotes: () => r<Remote[]>('remotes'),
     lastCommitMessage: () => r<string>('lastCommitMessage'),
     conflictContent: (path: string) => r<string>('conflictContent', path),
+    conflictSides: (path: string) => r<{ ours: boolean; theirs: boolean }>('conflictSides', path),
     getHidden: () => r<string[]>('getHidden'),
     identity: () => r<{ name: string; email: string }>('identity'),
     setIdentity: (name: string, email: string, global: boolean) => r<void>('setIdentity', name, email, global),
@@ -96,6 +107,7 @@ export function repoApi(root: string) {
     applyHunk: (file: FileDiff, hunk: number, lines: number[] | null, mode: 'stage' | 'unstage' | 'discard') =>
       r<void>('applyHunk', file, hunk, lines, mode),
     resolveConflict: (path: string, side: 'ours' | 'theirs') => r<void>('resolveConflict', path, side),
+    saveResolution: (path: string, content: string) => r<void>('saveResolution', path, content),
 
     commit: (o: CommitOptions) => r<CommandResult>('commit', o),
     checkout: (ref: string) => r<CommandResult>('checkout', ref),

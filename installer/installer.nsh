@@ -32,3 +32,27 @@
     ${EndIf}
   ${EndIf}
 !macroend
+
+; AI command-line tools for the AI pane: Claude Code (the default), Codex, Gemini and Copilot.
+; Installed per user after the app, only the ones that are missing. Never blocks setup.
+!macro customInstall
+  ${IfNot} ${UAC_IsInnerInstance}
+    InitPluginsDir
+    File "/oname=$PLUGINSDIR\ensure-ai.ps1" "${PROJECT_DIR}\installer\ensure-ai.ps1"
+    StrCpy $R8 'powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$PLUGINSDIR\ensure-ai.ps1"'
+    nsExec::ExecToStack '$R8 -Check'
+    Pop $0
+    Pop $1
+    ${If} $0 != "0"
+      ${IfNot} ${Silent}
+        MessageBox MB_YESNO|MB_ICONQUESTION "Odysseus has an AI pane that runs AI coding tools in your repositories. These aren't installed yet:$\r$\n$\r$\n$1$\r$\nInstall them now? Claude Code comes from claude.ai; Codex, Gemini and Copilot come from npm and need Node.js." IDNO odysseus_skip_ai
+      ${EndIf}
+      Banner::show /set 76 "Installing AI tools" "Installing Claude Code and other AI command-line tools."
+      nsExec::ExecToStack '$R8 -Install'
+      Pop $0
+      Pop $1
+      Banner::destroy
+      odysseus_skip_ai:
+    ${EndIf}
+  ${EndIf}
+!macroend

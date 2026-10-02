@@ -260,6 +260,7 @@ export function WorkingPanel() {
               {area === 'staged' && <button className="btn small" onClick={() => repo.mutate(() => api.unstage([f.path]), ['status'], optimisticUnstage([f.path]))}>Unstage</button>}
               {area === 'conflicted' && (
                 <>
+                  <button className="btn small primary" onClick={() => repo.resolveConflicts(f.path)}>Resolve…</button>
                   <button className="btn small" onClick={() => repo.mutate(() => api.resolveConflict(f.path, 'ours'), ['status'], optimisticResolve(f.path))}>{status.operation === 'rebasing' ? 'Use upstream' : 'Use ours'}</button>
                   <button className="btn small" onClick={() => repo.mutate(() => api.resolveConflict(f.path, 'theirs'), ['status'], optimisticResolve(f.path))}>{status.operation === 'rebasing' ? 'Use mine' : 'Use theirs'}</button>
                   <button className="btn small" onClick={() => repo.mutate(() => api.stage([f.path]), ['status'], optimisticResolve(f.path))}>Mark resolved</button>
@@ -281,6 +282,7 @@ export function WorkingPanel() {
             Repository is <b>{status.operation}</b>
             {status.conflicted.length > 0 && `, ${status.conflicted.length} conflicted file(s)`}
           </span>
+          {status.conflicted.length > 0 && <button className="btn small" onClick={() => repo.resolveConflicts()}>Resolve conflicts…</button>}
           <button className="btn small" onClick={() => repo.exec(() => api.abortOperation(status.operation!))}>Abort</button>
           <button className="btn small primary" disabled={status.conflicted.length > 0} onClick={() => repo.exec(() => api.continueOperation(status.operation!))}>
             Continue

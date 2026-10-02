@@ -30,6 +30,8 @@ export interface RepoCtx {
   select(sha: string): void
   branchMenu(e: React.MouseEvent, b: Branch): void
   openPalette(step: Step): void
+  /** Opens the conflict resolver, on a given file or the first conflicted one. */
+  resolveConflicts(path?: string): void
 }
 
 export const RepoContext = createContext<RepoCtx | null>(null)

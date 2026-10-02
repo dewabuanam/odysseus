@@ -12,6 +12,7 @@ import { GitRepo } from '../src/main/git/repo'
 import { HookService } from '../src/main/git/hooks'
 import { layoutGraph } from '../src/main/git/parsers'
 import { parseSearch } from '../src/shared/search'
+import { mergeResult, parseConflicts } from '../src/shared/conflicts'
 
 const settings: Settings = {
   extraPath: [],
@@ -493,6 +494,37 @@ async function main() {
     assert.ok(a.ok, a.stderr)
     assert.equal((await repo.status()).operation, null)
     assert.equal(sh(dir, 'rev-parse', 'HEAD').trim(), before)
+  })
+
+  await test('merge conflict: resolved block by block in the resolver, then a deleted side', async () => {
+    sh(dir, 'checkout', '-q', '-b', 'conflict-e', 'conflict-b~1')
+    writeFileSync(join(dir, 'conflict.txt'), 'e side\n')
+    sh(dir, 'commit', '-qam', 'e side')
+    let r = await repo.merge('conflict-b')
+    assert.equal(r.ok, false)
+    const parts = parseConflicts(repo.conflictContent('conflict.txt'))
+    const blocks = parts.filter((p) => p.kind === 'conflict')
+    assert.equal(blocks.length, 1)
+    assert.equal(mergeResult(parts, ['none']), repo.conflictContent('conflict.txt'), 'unchosen blocks keep their markers')
+    await repo.saveResolution('conflict.txt', mergeResult(parts, ['ours-theirs']))
+    assert.equal((await repo.status()).conflicted.length, 0)
+    assert.equal(readFileSync(join(dir, 'conflict.txt'), 'utf8'), 'e side\ntheirs\n')
+    await assert.rejects(repo.saveResolution('../outside.txt', 'x'), /outside the repository/)
+    r = await repo.continueOperation('merging')
+    assert.ok(r.ok, r.stderr)
+
+    // Deleted on one side, changed on the other: taking the deleting side removes the file.
+    sh(dir, 'checkout', '-q', '-b', 'conflict-f', 'conflict-b~1')
+    sh(dir, 'rm', '-q', 'conflict.txt')
+    sh(dir, 'commit', '-qm', 'f deletes')
+    r = await repo.merge('conflict-b')
+    assert.equal(r.ok, false)
+    assert.deepEqual(await repo.conflictSides('conflict.txt'), { ours: false, theirs: true })
+    await repo.resolveConflict('conflict.txt', 'ours')
+    assert.equal((await repo.status()).conflicted.length, 0)
+    assert.equal(existsSync(join(dir, 'conflict.txt')), false)
+    r = await repo.continueOperation('merging')
+    assert.ok(r.ok, r.stderr)
   })
 
   await test('rebase conflict: detected, resolved by editing, continued', async () => {

@@ -16,10 +16,15 @@ interface Props {
   onParent(): void
   onPalette(): void
   onBranchMenu(): void
+  terminalOpen: boolean
+  /** Name of the default AI program, shown on the pane button */
+  aiName: string
+  terminalKeys?: string
+  onTerminal(): void
 }
 
 /** Frameless window chrome: repository tabs, branch switcher, palette trigger, window controls. */
-export function TitleBar({ repoName, active, status, parent, paletteKeys, onParent, onPalette, onBranchMenu }: Props) {
+export function TitleBar({ repoName, active, status, parent, paletteKeys, onParent, onPalette, onBranchMenu, terminalOpen, aiName, terminalKeys, onTerminal }: Props) {
   const [platform, setPlatform] = useState<string>('win32')
   const [maximized, setMaximized] = useState(false)
   const runs = useRuns()
@@ -66,6 +71,16 @@ export function TitleBar({ repoName, active, status, parent, paletteKeys, onPare
         {running ? <span className="spinner" /> : paletteKeys && <kbd>{formatKeys(paletteKeys)}</kbd>}
       </button>
       <div className="tb-drag" />
+      {active && (
+        <button
+          className={`tb-btn tb-term ${terminalOpen ? 'on' : ''}`}
+          onClick={onTerminal}
+          title={`${aiName} and terminals for this repository or workspace${terminalKeys ? ` (${formatKeys(terminalKeys)})` : ''}`}
+        >
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"><rect x="1" y="2" width="14" height="12" rx="1.5" /><path d="m4 6 2.5 2L4 10M8 10.5h4" /></svg>
+          {aiName}
+        </button>
+      )}
       {!mac && (
         <div className="win-controls">
           <button className="win-btn" onClick={() => api.windowMinimize()} aria-label="Minimize">

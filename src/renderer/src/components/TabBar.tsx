@@ -1,26 +1,34 @@
 import { useEffect, useRef, useState } from 'react'
-import type { RepoSummary } from '@shared/types'
+import type { RepoSummary, Workspace } from '@shared/types'
 import { norm, useRuns } from '../runs'
 import { useUi } from '../ui'
+import { barItems, type BarItem } from '../workspaces'
 
 const TAB_W = 168
 const BUTTONS_W = 76
+const chipWidth = (w: Workspace) => Math.min(150, 26 + w.name.length * 7.2)
 
 interface Props {
   tabs: RepoSummary[]
   active: string | null
+  workspaces: Workspace[]
   onSelect(path: string): void
   onClose(path: string): void
   onNew(): void
   /** Move a tab to a new position in the tab order */
   onMove(path: string, index: number): void
+  /** A collapsed group's chip was clicked: switch to that group */
+  onOpenGroup(w: Workspace): void
+  onGroupMenu(e: React.MouseEvent, w: Workspace): void
+  onTabMenu(e: React.MouseEvent, path: string): void
 }
 
 /**
- * Repository tabs on their own row. Only as many tabs as fit are shown; the rest live in the
- * ▾ menu to the left of +. The active tab is always visible.
+ * Repository tabs on their own row, grouped like browser tab groups: each workspace is a
+ * colored chip. Only the group holding the active tab is expanded; the others show just their
+ * chip. Tabs that don't fit live in the ▾ menu; the active tab is always visible.
  */
-export function TabBar({ tabs, active, onSelect, onClose, onNew, onMove }: Props) {
+export function TabBar({ tabs, active, workspaces, onSelect, onClose, onNew, onOpenGroup, onGroupMenu, onTabMenu }: Props) {
   const ui = useUi()
   const runs = useRuns()
   const ref = useRef<HTMLDivElement>(null)
@@ -34,58 +42,95 @@ export function TabBar({ tabs, active, onSelect, onClose, onNew, onMove }: Props
     return () => ro.disconnect()
   }, [])
 
-  const fit = Math.max(1, Math.floor((width - BUTTONS_W) / TAB_W))
-  const visible = tabs.slice(0, fit)
-  const hidden = tabs.slice(fit)
+  const items = barItems(tabs, workspaces, active)
+  const itemW = (i: BarItem) => (i.kind === 'group' ? chipWidth(i.ws) : TAB_W)
+  const budget = width - BUTTONS_W
+  let fit = 0
+  for (let used = 0; fit < items.length && used + itemW(items[fit]) <= budget; fit++) used += itemW(items[fit])
+  fit = Math.max(1, fit)
+  let visible = items.slice(0, fit)
+  let hidden = items.slice(fit)
+  // The active tab always shows: it takes the last visible slot.
+  const activeAt = items.findIndex((i) => i.kind === 'tab' && i.tab.path === active)
+  if (activeAt >= fit) {
+    const last = visible[visible.length - 1]
+    visible = [...visible.slice(0, -1), items[activeAt]]
+    hidden = [last, ...hidden.filter((i) => i !== items[activeAt])]
+  }
 
-  // A hidden tab that becomes active (picked from the dropdown, Ctrl+Tab, Ctrl+1..9) moves into
-  // the last visible slot for good; the tab it displaces becomes the first one in the dropdown.
-  const activeIndex = tabs.findIndex((t) => t.path === active)
-  useEffect(() => {
-    if (active && activeIndex >= fit) onMove(active, fit - 1)
-  }, [active, activeIndex, fit, onMove])
   const busy = (path: string) => runs.some((r) => norm(r.root) === norm(path) && r.endedAt === undefined)
+  const groupBusy = (w: Workspace) => w.repos.some(busy)
 
   return (
     <div className="tabbar" ref={ref}>
-      {visible.map((t) => (
-        <div
-          key={t.path}
-          className={`tab ${t.path === active ? 'active' : ''}`}
-          style={{ width: TAB_W }}
-          title={t.path}
-          onMouseDown={(e) => {
-            if (e.button === 1) {
+      {visible.map((item) =>
+        item.kind === 'group' ? (
+          <div
+            key={`g:${item.ws.id}`}
+            className={`tab-group ${item.open ? 'open' : ''}`}
+            style={{ '--group': `var(--lane-${item.ws.color})`, maxWidth: chipWidth(item.ws) } as React.CSSProperties}
+            title={`${item.ws.name}: ${item.ws.repos.length} tab${item.ws.repos.length === 1 ? '' : 's'}\n${item.ws.folder}${item.open ? '' : '\nClick to open this workspace'}`}
+            onClick={() => !item.open && onOpenGroup(item.ws)}
+            onContextMenu={(e) => {
               e.preventDefault()
-              onClose(t.path)
-            }
-          }}
-          onClick={() => onSelect(t.path)}
-        >
-          {busy(t.path) && <span className="spinner tiny" />}
-          <span className="ellipsis grow">{t.name}</span>
-          <button
-            className="tab-close"
-            aria-label={`Close ${t.name}`}
-            onClick={(e) => {
-              e.stopPropagation()
-              onClose(t.path)
+              onGroupMenu(e, item.ws)
             }}
           >
-            ×
-          </button>
-        </div>
-      ))}
+            {!item.open && groupBusy(item.ws) && <span className="spinner tiny" />}
+            <span className="ellipsis">{item.ws.name}</span>
+          </div>
+        ) : (
+          <div
+            key={item.tab.path}
+            className={`tab ${item.tab.path === active ? 'active' : ''} ${item.ws ? 'grouped' : ''}`}
+            style={{ width: TAB_W, ...(item.ws ? ({ '--group': `var(--lane-${item.ws.color})` } as React.CSSProperties) : {}) }}
+            title={item.tab.path}
+            onMouseDown={(e) => {
+              if (e.button === 1) {
+                e.preventDefault()
+                onClose(item.tab.path)
+              }
+            }}
+            onClick={() => onSelect(item.tab.path)}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              onTabMenu(e, item.tab.path)
+            }}
+          >
+            {busy(item.tab.path) && <span className="spinner tiny" />}
+            <span className="ellipsis grow">{item.tab.name}</span>
+            <button
+              className="tab-close"
+              aria-label={`Close ${item.tab.name}`}
+              onClick={(e) => {
+                e.stopPropagation()
+                onClose(item.tab.path)
+              }}
+            >
+              ×
+            </button>
+          </div>
+        )
+      )}
       {hidden.length > 0 && (
         <button
           className="tab-more"
-          title={`${hidden.length} more open repositor${hidden.length === 1 ? 'y' : 'ies'}`}
+          title={`${hidden.length} more`}
           onClick={(e) => {
             const r = e.currentTarget.getBoundingClientRect()
+            const hiddenTabs = hidden.flatMap((i) => (i.kind === 'tab' ? [i.tab] : []))
             ui.menu({ clientX: r.left, clientY: r.bottom + 2 }, [
-              ...hidden.map((t) => ({ label: `${busy(t.path) ? '● ' : ''}${t.name}`, action: () => onSelect(t.path) })),
-              { separator: true, label: '' },
-              { label: `Close ${hidden.length} hidden tab${hidden.length === 1 ? '' : 's'}`, danger: true, action: () => hidden.forEach((t) => onClose(t.path)) }
+              ...hidden.map((i) =>
+                i.kind === 'group'
+                  ? { label: `▣ ${i.ws.name} (${i.ws.repos.length})`, action: () => onOpenGroup(i.ws) }
+                  : { label: `${busy(i.tab.path) ? '● ' : ''}${i.tab.name}`, action: () => onSelect(i.tab.path) }
+              ),
+              ...(hiddenTabs.length
+                ? [
+                    { separator: true, label: '' },
+                    { label: `Close ${hiddenTabs.length} hidden tab${hiddenTabs.length === 1 ? '' : 's'}`, danger: true, action: () => hiddenTabs.forEach((t) => onClose(t.path)) }
+                  ]
+                : [])
             ])
           }}
         >

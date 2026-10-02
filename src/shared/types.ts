@@ -306,6 +306,35 @@ export interface Settings {
   theme: 'dark' | 'light'
   /** Keyboard shortcut preset */
   keymap: Keymap
+  /** Shell for the terminal pane; empty = PowerShell on Windows, $SHELL elsewhere */
+  terminalShell: string
+  /** Programs offered in the terminal pane besides the plain shell, e.g. AI CLIs */
+  terminalProfiles: TerminalProfile[]
+  /** Profile name the terminal pane starts when it opens ('Shell' for a plain shell) */
+  terminalDefault: string
+}
+
+/** A program the terminal pane can start, run inside the configured shell. */
+export interface TerminalProfile {
+  name: string
+  /** Command line to run; empty = just the shell */
+  command: string
+  /** Shell command that installs the program, run first when it isn't on PATH */
+  install?: string
+}
+
+/** A group of repository tabs, like a browser tab group, with a folder its terminals open in. */
+export interface Workspace {
+  id: string
+  name: string
+  /** Index into the lane colors */
+  color: number
+  /** Folder the workspace's terminals and AI sessions start in */
+  folder: string
+  /** Repository paths in the group, in tab order */
+  repos: string[]
+  /** The tab to show when the group is picked */
+  lastActive?: string
 }
 
 export interface EnvDiagnostics {

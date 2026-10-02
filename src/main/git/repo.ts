@@ -1,6 +1,6 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { isAbsolute, join, resolve } from 'node:path'
+import { isAbsolute, join, relative, resolve } from 'node:path'
 import type { SearchQuery } from '@shared/search'
 import type {
   Branch,
@@ -543,8 +543,28 @@ if(!done&&m&&sha.startsWith(m[1])){done=true;return '${action} '+m[1]+m[2]}retur
 
   /** Resolve a conflicted file by taking one side wholesale, then mark it resolved. */
   async resolveConflict(path: string, side: 'ours' | 'theirs'): Promise<void> {
+    // That side deleted the file: taking it means deleting the file.
+    if (!(await this.conflictSides(path))[side]) {
+      await this.write(['rm', '-q', '--', path])
+      return
+    }
     await this.write(['checkout', `--${side}`, '--', path])
     await this.write(['add', '--', path])
+  }
+
+  /** Writes a hand-merged result over the conflicted file and marks it resolved. */
+  async saveResolution(path: string, content: string): Promise<void> {
+    const rel = relative(this.root, resolve(this.root, path))
+    if (!rel || rel.startsWith('..') || isAbsolute(rel)) throw new Error('Path is outside the repository')
+    writeFileSync(join(this.root, rel), content)
+    await this.write(['add', '--', path])
+  }
+
+  /** Which sides of a conflict have a file (index stages 2 and 3); one is missing when it was deleted there. */
+  async conflictSides(path: string): Promise<{ ours: boolean; theirs: boolean }> {
+    const out = await this.data(['ls-files', '-u', '-z', '--', path]).catch(() => '')
+    const stages = new Set(out.split('\0').map((r) => r.match(/^\d+ [0-9a-f]+ (\d)\t/)?.[1]))
+    return { ours: stages.has('2'), theirs: stages.has('3') }
   }
 
   conflictContent(path: string): string {

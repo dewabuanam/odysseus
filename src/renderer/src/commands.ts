@@ -46,6 +46,7 @@ export interface CommandDeps {
   commitAction(a: CommitAction): void
   toggleConsole(): void
   toggleSidebar(): void
+  resolveConflicts(path?: string): void
   toggleTheme(): void
   openSettings(): void
   refresh(): void
@@ -114,6 +115,55 @@ function nextVersions(tags: Tag[]): Suggestion[] {
 }
 
 const repoName = (url: string) => url.replace(/\/+$/, '').replace(/\.git$/, '').split(/[/:\\]/).pop() || 'module'
+
+// ------------------------------------------------------------------ static ranking
+
+/**
+ * Commands in rough order of everyday use, most common first. The palette lists them in this
+ * order and uses the rank to break near-ties while typing, so "p" offers Pull before Push and
+ * both before Preferences. Commands not listed keep their place after these.
+ */
+const PRIORITY = [
+  'op.resolve',
+  'op.continue',
+  'op.abort',
+  'remote.pull',
+  'remote.push',
+  'commit',
+  'ai.open',
+  'remote.fetch',
+  'branch.checkout',
+  'stage.all',
+  'branch.new',
+  'commit.commit',
+  'stash.push',
+  'stash.pop',
+  'branch.merge',
+  'view.terminal',
+  'goto.working',
+  'view.find',
+  'goto.commit',
+  'branch.rebase',
+  'commit.undo',
+  'stage.none',
+  'commit.focus',
+  'view.refresh',
+  'repo.open',
+  'repo.recent',
+  'tab.new',
+  'stash.manage',
+  'branch.delete',
+  'tag.create',
+  'commit.noverify',
+  'stage.discard',
+  'branch.goto',
+  'view.history',
+  'view.console'
+]
+const RANK = new Map(PRIORITY.map((id, i) => [id, (PRIORITY.length - i) * 0.4]))
+
+/** Attach the static rank to each command. */
+export const ranked = (cmds: Cmd[]): Cmd[] => cmds.map((c) => (RANK.has(c.id) ? { ...c, priority: RANK.get(c.id) } : c))
 
 // ------------------------------------------------------------------ pickers
 
@@ -462,6 +512,7 @@ export function buildCommands(d: CommandDeps): Cmd[] {
 
     // operations
     { id: 'op.continue', title: `Operation: Continue ${op ?? ''}`, when: has && !!op, run: () => { d.exec(() => d.api.continueOperation(op!)) } },
+    { id: 'op.resolve', title: 'Operation: Resolve Conflicts…', detail: `${s?.conflicted.length ?? 0} file(s)`, when: has && !!s?.conflicted.length, run: () => d.resolveConflicts() },
     { id: 'op.abort', title: `Operation: Abort ${op ?? ''}`, when: has && !!op, run: () => { d.exec(() => d.api.abortOperation(op!)) } },
 
     // submodules
