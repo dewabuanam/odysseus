@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   Branch,
   CommandResult,
@@ -46,7 +46,7 @@ interface Props {
   tab: RepoSummary
   active: boolean
   openRepo(dir: string): void
-  closeTab(): void
+  closeTab(path: string): void
   openPalette(step: Step): void
   openSettings(): void
   toggleTheme(): void
@@ -54,7 +54,11 @@ interface Props {
   onInfo(root: string, info: TabInfo): void
 }
 
-export function RepoView({ tab, active, openRepo, closeTab, openPalette, openSettings, toggleTheme, register, onInfo }: Props) {
+/**
+ * Memoized: the app re-renders often (AI status, other tabs), and an unchanged repository view
+ * (every open tab has one) skips that.
+ */
+export const RepoView = memo(function RepoView({ tab, active, openRepo, closeTab, openPalette, openSettings, toggleTheme, register, onInfo }: Props) {
   const ui = useUi()
   const api = useMemo(() => repoApi(tab.path), [tab.path])
   const [status, setStatus] = useState<WorkingStatus | null>(null)
@@ -356,7 +360,7 @@ export function RepoView({ tab, active, openRepo, closeTab, openPalette, openSet
     ask: ui.ask,
     toast: ui.toast,
     openRepo,
-    closeRepo: closeTab,
+    closeRepo: () => closeTab(tab.path),
     select,
     showHooks: (h) => {
       if (h) setHookSel(h)
@@ -505,7 +509,7 @@ export function RepoView({ tab, active, openRepo, closeTab, openPalette, openSet
       </RepoContext.Provider>
     </ApiContext.Provider>
   )
-}
+})
 
 function lastLine(s: string): string {
   const lines = s.trim().split('\n').filter((l) => l.trim() && !/^(hint|remote):/.test(l))

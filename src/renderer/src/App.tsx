@@ -70,6 +70,11 @@ const commandTitle = (name: string) =>
     .map((w) => w[0].toUpperCase() + w.slice(1))
     .join(' ')
 
+const sameStates = (a: Record<string, AiState>, b: Record<string, AiState>) => {
+  const ka = Object.keys(a)
+  return ka.length === Object.keys(b).length && ka.every((k) => a[k] === b[k])
+}
+
 export function App() {
   return (
     <UiProvider>
@@ -195,6 +200,7 @@ function Shell() {
   }, [])
 
   const onInfo = useCallback((root: string, i: TabInfo) => setInfo((prev) => ({ ...prev, [root]: i })), [])
+  const openSettings = useCallback(() => setSettingsOpen(true), [])
 
   // ------------------------------------------------------------ boot + events
 
@@ -313,6 +319,23 @@ function Shell() {
     submit: (v) => submit(v.trim())
   })
 
+  /** Palette step: name a repository in Odysseus (its tab, the AI pane, recent list). */
+  const aliasStep = (path: string): Step => {
+    const t = stateRef.current.tabs.find((x) => x.path === path)
+    const folder = path.split(/[\\/]/).filter(Boolean).pop() ?? path
+    return {
+      kind: 'input',
+      title: 'Rename Repository',
+      placeholder: `Name for ${folder}; leave empty for the folder name`,
+      allowEmpty: true,
+      value: t?.name ?? folder,
+      submit: async (v: string) => {
+        const r = await api.setAlias(path, v.trim())
+        setTabs((cur) => cur.map((x) => (x.path === path ? { ...x, name: r.name } : x)))
+      }
+    }
+  }
+
   /** Palette step: put a tab into a group, existing or new. */
   const addToWorkspaceStep = (path: string): Step => ({
     kind: 'list',
@@ -372,6 +395,7 @@ function Shell() {
       },
       ...(w ? [{ label: `Remove from ${w.name}`, action: () => saveWorkspaces(withoutRepos(stateRef.current.workspaces, [path])) }] : []),
       { separator: true, label: '' },
+      { label: 'Rename…', action: () => openPalette(aliasStep(path)) },
       { label: 'Close tab', action: () => closeTab(path) }
     ])
   }
@@ -519,6 +543,7 @@ function Shell() {
     { id: 'ws.add', title: 'Workspace: Add Tab to Workspace…', when: !!stateRef.current.active, run: () => addToWorkspaceStep(stateRef.current.active!) },
     { id: 'ws.remove', title: `Workspace: Remove Tab from ${activeWs?.name ?? ''}`, when: !!activeWs, run: () => saveWorkspaces(withoutRepos(stateRef.current.workspaces, [stateRef.current.active!])) },
     ...workspaces.filter((w) => w.id !== activeWs?.id).map((w) => ({ id: `ws.goto.${w.id}`, title: `Workspace: Switch to ${w.name}`, detail: `${w.repos.length} tab(s)`, run: () => openWorkspace(w) })),
+    { id: 'tab.rename', title: 'Tab: Rename Repository…', detail: 'a name for it in Odysseus; the folder stays as it is', when: !!stateRef.current.active, run: () => aliasStep(stateRef.current.active!) },
     { id: 'ws.rename', title: 'Workspace: Rename…', when: !!activeWs, run: () => nameStep('Rename', activeWs!.name, (name) => name && updateWorkspace(activeWs!.id, { name })) },
     { id: 'ws.folder', title: 'Workspace: Change Folder…', detail: activeWs?.folder, when: !!activeWs, run: () => { changeFolder(activeWs!) } },
     { id: 'ws.close', title: 'Workspace: Close Workspace and Its Tabs', when: !!activeWs, run: () => closeWorkspace(activeWs!) },
@@ -733,9 +758,9 @@ function Shell() {
           tab={t}
           active={t.path === active}
           openRepo={openRepo}
-          closeTab={() => closeTab(t.path)}
+          closeTab={closeTab}
           openPalette={openPalette}
-          openSettings={() => setSettingsOpen(true)}
+          openSettings={openSettings}
           toggleTheme={toggleTheme}
           register={register}
           onInfo={onInfo}
@@ -743,7 +768,8 @@ function Shell() {
       ))}
       </div>
       {termUsed && <TerminalPane ref={termRef} scopes={scopes} live={liveScopes} ready={!booting} onAiStates={(s, n) => {
-            setAiStates(s)
+            // Same states as before: skip re-rendering the app.
+            setAiStates((prev) => (sameStates(prev, s) ? prev : s))
             setAiWorking(n)
           }} appSettings={appSettings} onSettings={setAppSettings} open={termOpen && !!activeTab} wanted={termOpen} onClose={() => setTermOpen(false)} />}
       </div>

@@ -93,7 +93,7 @@ Press **Ctrl+P**. Every action lives there, with fuzzy matching (`chk` finds *Ch
 
 ### Tabs and a command queue
 
-- Open any number of repositories in **tabs** on their own row. Tabs that don't fit go into the **▾** menu next to **+**; picking one from there moves it into the visible row (the last visible tab moves into the menu). Tab order is restored on launch.
+- Open any number of repositories in **tabs** on their own row. Tabs that don't fit go into the **▾** menu next to **+**; picking one from there moves it into the visible row (the last visible tab moves into the menu). Tab order is restored on launch. Give a repository its own name with **Rename…** on the tab's right-click menu (or **Tab: Rename Repository…**); the name shows on its tab, in the AI pane and in the recent list, and an empty name goes back to the folder name.
 - **Every git command is queued per repository** and runs strictly in order. Pull, checkout another branch, pull, checkout, pull: fire them as fast as you like and they run in exactly that sequence, never two at once. Queued commands show in the console with a button to drop them.
 - **Command history** of every command, its output, exit code and failing hook, kept across restarts (Ctrl+H).
 

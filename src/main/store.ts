@@ -16,6 +16,8 @@ interface StoreData {
   workspaces: Workspace[]
   /** AI pane sessions, restored on launch */
   aiPane: AiPaneState
+  /** Names shown for repositories instead of their folder name, by normalized path */
+  aliases: Record<string, string>
 }
 
 const DEFAULTS: StoreData = {
@@ -46,7 +48,8 @@ const DEFAULTS: StoreData = {
   activeTab: null,
   hidden: {},
   workspaces: [],
-  aiPane: { open: false, sessions: [], active: {} }
+  aiPane: { open: false, sessions: [], active: {} },
+  aliases: {}
 }
 
 let data: StoreData = structuredClone(DEFAULTS)
@@ -110,8 +113,25 @@ export function removeRecent(path: string): void {
   save()
 }
 
+const aliasKey = (path: string) => path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+
+/** The repository's name in Odysseus: its alias, else its folder name. */
+export function repoName(path: string): string {
+  return data.aliases?.[aliasKey(path)] || basename(path) || path
+}
+
+/** Sets the repository's alias; an empty one goes back to the folder name. */
+export function setAlias(path: string, alias: string): RepoSummary {
+  const aliases = { ...(data.aliases ?? {}) }
+  if (alias.trim() && alias.trim() !== basename(path)) aliases[aliasKey(path)] = alias.trim()
+  else delete aliases[aliasKey(path)]
+  data.aliases = aliases
+  save()
+  return { path, name: repoName(path) }
+}
+
 export function getRecent(): RepoSummary[] {
-  return data.recentRepos.filter((p) => existsSync(p)).map((p) => ({ path: p, name: basename(p) }))
+  return data.recentRepos.filter((p) => existsSync(p)).map((p) => ({ path: p, name: repoName(p) }))
 }
 
 export function getLastRepo(): string | null {
@@ -119,9 +139,9 @@ export function getLastRepo(): string | null {
 }
 
 export function getTabs(): { tabs: RepoSummary[]; active: string | null } {
-  const tabs = (data.tabs ?? []).filter((p) => existsSync(p)).map((p) => ({ path: p, name: basename(p) }))
+  const tabs = (data.tabs ?? []).filter((p) => existsSync(p)).map((p) => ({ path: p, name: repoName(p) }))
   // Upgrade path from single-repo versions
-  if (!tabs.length && data.lastRepo && existsSync(data.lastRepo)) tabs.push({ path: data.lastRepo, name: basename(data.lastRepo) })
+  if (!tabs.length && data.lastRepo && existsSync(data.lastRepo)) tabs.push({ path: data.lastRepo, name: repoName(data.lastRepo) })
   // No active tab (a collapsed workspace hid it) stays that way, showing the start page.
   const active = tabs.some((t) => t.path === data.activeTab) ? data.activeTab : data.activeTab === null && data.tabs?.length ? null : tabs[0]?.path ?? null
   return { tabs, active }

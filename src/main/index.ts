@@ -16,6 +16,8 @@ import {
   getRecent,
   getSettings,
   getAiPane,
+  repoName,
+  setAlias,
   getTabs,
   getWorkspaces,
   loadStore,
@@ -273,7 +275,7 @@ async function openRepo(dir: string): Promise<RepoSummary> {
   const root = await GitRepo.resolveRoot(runner, dir)
   register(root)
   addRecent(root)
-  return { path: root, name: root.split(/[\\/]/).pop() ?? root }
+  return { path: root, name: repoName(root) }
 }
 
 // ------------------------------------------------------------------ IPC: app-level
@@ -295,6 +297,7 @@ const appApi: Record<string, Handler> = {
   getWorkspaces: () => getWorkspaces(),
   setWorkspaces: (ws: Workspace[]) => setWorkspaces(ws),
   getAiPane: () => getAiPane(),
+  setAlias: (path: string, alias: string) => setAlias(path, alias),
   setAiPane: (pane: AiPaneState) => setAiPane(pane),
   pickFolder: async (title?: string) => {
     const r = await dialog.showOpenDialog(win!, { properties: ['openDirectory'], title })

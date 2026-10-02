@@ -1,11 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { CommitDetail, FileDiff } from '@shared/types'
 import { useApi } from '../api'
 import { useRepo } from '../repoContext'
 import { useUi } from '../ui'
 import { DiffView } from './DiffView'
 
-export function CommitPanel({ sha }: { sha: string }) {
+/** How long the diffs of a small commit may hold back showing it, so it appears in one piece. */
+const DIFF_WAIT_MS = 250
+/** Dim the commit still on screen once the next one takes longer than this. */
+const SLOW_MS = 150
+
+export function CommitPanel({ sha: want }: { sha: string }) {
   const repo = useRepo()
   const api = useApi()
   const ui = useUi()
@@ -13,32 +18,62 @@ export function CommitPanel({ sha }: { sha: string }) {
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [diffs, setDiffs] = useState<Record<string, FileDiff | null>>({})
+  const [slow, setSlow] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
 
+  // The commit on screen stays until the next one is ready, instead of blanking to "Loading…".
+  // A small commit's diffs load with it (for a moment at most), so it doesn't jump as they arrive.
   useEffect(() => {
     let cancelled = false
-    setDetail(null)
     setError(null)
-    setDiffs({})
+    const t = setTimeout(() => !cancelled && setSlow(true), SLOW_MS)
     api
-      .commitDetail(sha)
-      .then((d) => {
+      .commitDetail(want)
+      .then(async (d) => {
+        if (cancelled) return
+        const auto = d.files.length <= 6 ? d.files.map((f) => f.path) : []
+        const got: Record<string, FileDiff | null> = {}
+        let shown = false
+        const loads = auto.map((path) =>
+          api.diff({ kind: 'commit', sha: want, path }).then(
+            (x) => {
+              got[path] = x
+              // A diff that missed the wait fills in once the commit is on screen.
+              if (shown && !cancelled) setDiffs((prev) => ({ ...prev, [path]: x }))
+            },
+            () => {}
+          )
+        )
+        await Promise.race([Promise.all(loads), new Promise((r) => setTimeout(r, DIFF_WAIT_MS))])
         if (cancelled) return
         setDetail(d)
-        // Auto-expand small commits.
-        const auto = d.files.length <= 6 ? d.files.map((f) => f.path) : []
         setExpanded(new Set(auto))
-        auto.forEach((p) => load(p))
+        setDiffs({ ...got })
+        setSlow(false)
+        shown = true
       })
-      .catch((e) => !cancelled && setError(e.message))
-    const load = (path: string) =>
-      api.diff({ kind: 'commit', sha, path }).then((d) => !cancelled && setDiffs((prev) => ({ ...prev, [path]: d })))
+      .catch((e) => {
+        if (cancelled) return
+        setError(e.message)
+        setSlow(false)
+      })
+      .finally(() => clearTimeout(t))
     return () => {
       cancelled = true
+      clearTimeout(t)
     }
-  }, [sha])
+  }, [want])
+
+  // A new commit starts at the top.
+  const shownSha = detail?.sha
+  useLayoutEffect(() => {
+    const scroller = root.current?.parentElement
+    if (scroller) scroller.scrollTop = 0
+  }, [shownSha])
 
   if (error) return <div className="empty">{error}</div>
-  if (!detail) return <div className="empty">Loading…</div>
+  if (!detail) return slow ? <div className="empty">Loading…</div> : null
+  const sha = detail.sha
 
   const toggle = (path: string) => {
     const n = new Set(expanded)
@@ -51,7 +86,7 @@ export function CommitPanel({ sha }: { sha: string }) {
   }
 
   return (
-    <div className="detail">
+    <div ref={root} key={sha} className={`detail fade-in ${slow ? 'stale' : ''}`}>
       <h2>{detail.subject}</h2>
       {detail.body.split('\n').slice(1).join('\n').trim() && (
         <pre className="body">{detail.body.split('\n').slice(1).join('\n').trim()}</pre>

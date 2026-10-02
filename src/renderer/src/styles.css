@@ -243,6 +243,11 @@ kbd {
 
 /* ---------- detail panes */
 .detail { padding: 14px 16px 40px; }
+/* A commit appears with a quick fade instead of popping in; the one it replaces dims while the next loads. */
+.fade-in { animation: fade-in 120ms ease-out; }
+@keyframes fade-in { from { opacity: 0; transform: translateY(3px); } }
+.detail.stale { opacity: 0.55; transition: opacity 120ms; }
+@media (prefers-reduced-motion: reduce) { .fade-in { animation: none; } .detail.stale { transition: none; } }
 .detail h2 { font-size: 16px; margin: 0 0 6px; font-weight: 600; user-select: text; }
 .detail .body { white-space: pre-wrap; color: var(--ink-2); margin: 0 0 12px; user-select: text; font-family: var(--mono); font-size: 12px; }
 .meta-grid { display: grid; grid-template-columns: 80px 1fr; gap: 3px 10px; font-size: 12px; margin-bottom: 14px; user-select: text; }

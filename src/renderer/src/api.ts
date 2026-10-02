@@ -56,6 +56,8 @@ export const api = {
   getWorkspaces: () => call<Workspace[]>('getWorkspaces'),
   setWorkspaces: (ws: Workspace[]) => call<void>('setWorkspaces', ws),
   getAiPane: () => call<AiPaneState>('getAiPane'),
+  /** Names a repository in Odysseus; empty goes back to its folder name */
+  setAlias: (path: string, alias: string) => call<RepoSummary>('setAlias', path, alias),
   setAiPane: (pane: AiPaneState) => call<void>('setAiPane', pane),
   pickFolder: (title?: string) => call<string | null>('pickFolder', title),
   scanRepos: (folder: string) => call<string[]>('scanRepos', folder),

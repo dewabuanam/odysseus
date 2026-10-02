@@ -160,7 +160,23 @@ function geminiCommands(dir: string, source: string): AiCommand[] {
   })
 }
 
+/**
+ * Results are kept for a little while: the list is read again on every tab switch, and reading
+ * it scans folders on disk in the main process, which would stall the terminals meanwhile.
+ */
+const CACHE_MS = 30_000
+const cache = new Map<string, { at: number; list: AiCommand[] }>()
+
 export function aiCommands(command: string, cwd: string): AiCommand[] {
+  const key = JSON.stringify([command, cwd])
+  const hit = cache.get(key)
+  if (hit && Date.now() - hit.at < CACHE_MS) return hit.list
+  const list = readAiCommands(command, cwd)
+  cache.set(key, { at: Date.now(), list })
+  return list
+}
+
+function readAiCommands(command: string, cwd: string): AiCommand[] {
   const home = homedir()
   let list: AiCommand[]
   switch (programOf(command)) {
