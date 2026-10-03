@@ -4,6 +4,7 @@ import { api } from '../api'
 import { useUi } from '../ui'
 import { formatKeys } from '../palette'
 import logo from '../assets/logo.png'
+import { OdysseyArt } from './OdysseyArt'
 
 export function Welcome({ onOpen, onWorkspace }: { onOpen(dir: string): void; onWorkspace(): void }) {
   const ui = useUi()
@@ -28,6 +29,10 @@ export function Welcome({ onOpen, onWorkspace }: { onOpen(dir: string): void; on
 
   return (
     <div className="welcome">
+      <OdysseyArt name="helmet" className="welcome-art helmet" />
+      <OdysseyArt name="horse" className="welcome-art horse" />
+      <OdysseyArt name="owl" className="welcome-art owl" />
+      <OdysseyArt name="ship" className="welcome-art ship" />
       <div className="welcome-card">
         <img src={logo} alt="Odysseus" />
         <h1>ODYSSEUS</h1>

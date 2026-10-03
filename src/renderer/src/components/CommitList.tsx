@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
 import type { Commit, GraphRow, WorkingStatus } from '@shared/types'
 import { relTime } from '../ui'
+import { OdysseyArt } from './OdysseyArt'
 
 const ROW_H = 26
 // Extra height for the line of branch labels under a commit message
@@ -170,9 +171,16 @@ export function CommitList({ commits, graph, status, selected, active = true, re
   function renderList() {
     return (
       <>
-        {filtered && rows.length === 0 && <div className="empty">No commits match this search.</div>}
+        {filtered && rows.length === 0 && (
+          <div className="empty">
+            <OdysseyArt name="cyclops" className="empty-art" />
+            No commits match this search.
+          </div>
+        )}
         <div className="commit-scroll" ref={scrollRef} onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
           <div style={{ height: tops[total], position: 'relative' }}>{items}</div>
+          {/* A new repository: the ship waits for its first commit. */}
+          {!filtered && commits.length === 0 && <OdysseyArt name="ship" className="list-art" />}
         </div>
       </>
     )

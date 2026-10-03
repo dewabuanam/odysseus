@@ -7,6 +7,7 @@ import { norm, runStore, useActiveRun } from '../runs'
 import { Ansi, fmtDuration, useTicker, useUi } from '../ui'
 import { ConflictView } from './ConflictView'
 import { DiffView } from './DiffView'
+import { CALM_SCENES, OdysseyArt } from './OdysseyArt'
 import type { CommitAction } from '../commands'
 
 type Area = 'unstaged' | 'staged' | 'conflicted'
@@ -48,6 +49,7 @@ export function WorkingPanel() {
   const [amend, setAmend] = useState(false)
   const [skipHooks, setSkipHooks] = useState(false)
   const [committing, setCommitting] = useState(false)
+  const [calmScene] = useState(() => CALM_SCENES[Math.floor(Math.random() * CALM_SCENES.length)])
   const [failure, setFailure] = useState<Failure | null>(null)
   const [modifiedByHook, setModifiedByHook] = useState<string[]>([])
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -387,7 +389,12 @@ export function WorkingPanel() {
         )}
       </div>
 
-      {total === 0 && <div className="empty">Nothing to commit. Working tree clean.</div>}
+      {total === 0 && (
+        <div className="empty">
+          <OdysseyArt name={calmScene} className="empty-art" />
+          Nothing to commit. Working tree clean.
+        </div>
+      )}
 
       {status.conflicted.length > 0 && (
         <>

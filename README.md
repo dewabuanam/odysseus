@@ -127,6 +127,7 @@ Right-click a commit or a branch for full context menus: checkout, delete, renam
 - **Stashes, tags, remotes**, fetch / pull / push with upstream setup.
 - **Recovery prompts**: when local changes block a command, stash them, retry, and restore them; when git has no author identity, set it in two keystrokes.
 - **Paper & pencil look** in black and white, with colored-pencil graph lanes (branch labels take the color of their line, favoring the checked-out branch, then the newest), and a **chalkboard** dark theme.
+- **Drawings from the Odyssey** in quiet places: the welcome screen, a clean working tree, an empty history and a search with no results. Graphite on paper, chalk on the chalkboard, never in the way of your work.
 
 ![Chalkboard theme](docs/screenshots/chalkboard.png)
 

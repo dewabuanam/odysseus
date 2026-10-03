@@ -587,3 +587,31 @@ body:has(.overlay, .palette-overlay) .titlebar * { -webkit-app-region: no-drag; 
 }
 .tab.drop-before::before, .tab-group.drop-before::before { left: -3px; }
 .tab.drop-after::before, .tab-group.drop-after::before { right: -3px; }
+
+/* ---------- Odyssey drawings for empty, quiet places: graphite on paper, chalk on the board.
+   The texture is a static noise mask, rasterized once, so it costs nothing while you work. */
+:root { --art-ink: #45433e; --art-w: 1.6; --art-opacity: 0.32; --art-mask: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='220'%20height='220'%3E%3Cfilter%20id='n'%3E%3CfeTurbulence%20type='fractalNoise'%20baseFrequency='0.9'%20numOctaves='2'%20seed='4'%20stitchTiles='stitch'/%3E%3CfeColorMatrix%20values='0%200%200%200%200%20%200%200%200%200%200%20%200%200%200%200%200%20%202.2%200%200%200%20-0.35'/%3E%3C/filter%3E%3Crect%20width='100%25'%20height='100%25'%20filter='url%28%23n%29'/%3E%3C/svg%3E"); }
+:root[data-theme='dark'] { --art-ink: #f5f3ea; --art-w: 2.8; --art-opacity: 0.34; --art-mask: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='220'%20height='220'%3E%3Cfilter%20id='n'%3E%3CfeTurbulence%20type='fractalNoise'%20baseFrequency='0.75'%20numOctaves='2'%20seed='11'%20stitchTiles='stitch'/%3E%3CfeColorMatrix%20values='0%200%200%200%200%20%200%200%200%200%200%20%200%200%200%200%200%20%203.4%200%200%200%20-1.25'/%3E%3C/filter%3E%3Crect%20width='100%25'%20height='100%25'%20filter='url%28%23n%29'/%3E%3C/svg%3E"); }
+.art {
+  display: block; pointer-events: none; user-select: none; color: var(--art-ink); opacity: var(--art-opacity); overflow: visible;
+  -webkit-mask-image: var(--art-mask); mask-image: var(--art-mask); -webkit-mask-size: 220px; mask-size: 220px;
+}
+.art-lines { fill: none; stroke: currentColor; stroke-width: var(--art-w); stroke-linecap: round; stroke-linejoin: round; }
+.art .thin { stroke-width: calc(var(--art-w) * 0.6); }
+.art .bold { stroke-width: calc(var(--art-w) * 1.8); }
+.art .fill { fill: currentColor; }
+
+/* Welcome: the voyage begins around the card. */
+.welcome { position: relative; overflow: hidden; }
+.welcome-card { position: relative; z-index: 1; }
+.welcome-art { position: absolute; z-index: 0; }
+.welcome-art.helmet { width: 170px; top: 6%; left: 5%; }
+.welcome-art.horse { width: 250px; bottom: 6%; left: 4%; }
+.welcome-art.owl { width: 150px; top: 6%; right: 6%; }
+.welcome-art.ship { width: 330px; bottom: 5%; right: 3%; }
+@media (max-width: 1100px) { .welcome-art.helmet, .welcome-art.owl { display: none; } }
+@media (max-width: 860px), (max-height: 620px) { .welcome-art { display: none; } }
+
+/* Empty states: a small drawing above the message. */
+.empty-art { width: 200px; max-width: 70%; max-height: 170px; margin: 4px auto 10px; }
+.list-art { width: 260px; max-width: 70%; margin: 36px auto 0; }
