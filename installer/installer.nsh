@@ -35,6 +35,7 @@
 
 ; AI command-line tools for the AI pane: Claude Code (the default), Codex, Gemini and Copilot.
 ; Installed per user after the app, only the ones that are missing. Never blocks setup.
+; Then the app writes its skills into each tool's skills folder.
 !macro customInstall
   ${IfNot} ${UAC_IsInnerInstance}
     InitPluginsDir
@@ -54,5 +55,8 @@
       Banner::destroy
       odysseus_skip_ai:
     ${EndIf}
+    ; The commit skill (commits without AI co-author lines) for Claude Code, Codex, Gemini and Copilot.
+    nsExec::Exec '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" --install-skills'
+    Pop $0
   ${EndIf}
 !macroend

@@ -25,7 +25,7 @@ import { TabBar } from './components/TabBar'
 import { TitleBar } from './components/TitleBar'
 import { Welcome } from './components/Welcome'
 import { defaultProfile, hasRemote, TerminalPane, type TerminalHandle, type TermScope } from './components/TerminalPane'
-import { addRepos, commonFolder, newId, nextColor, prune, withoutRepos, wsOf, LANE_COUNT } from './workspaces'
+import { addRepos, commonFolder, dropInBar, newId, nextColor, prune, withoutRepos, wsOf, LANE_COUNT, type DragItem, type DropTarget } from './workspaces'
 
 const AI_BADGE: Record<AiState, string> = { waiting: '#d93a32', working: '#e0a400', idle: '#2f9a4f' }
 
@@ -178,16 +178,16 @@ function Shell() {
     persist(cur, cur[n].path)
   }, [])
 
-  const moveTab = useCallback((path: string, index: number) => {
-    const { tabs: cur, active: act } = stateRef.current
-    const from = cur.findIndex((t) => t.path === path)
-    if (from === -1 || from === index) return
-    const next = [...cur]
-    const [tab] = next.splice(from, 1)
-    next.splice(Math.max(0, Math.min(index, next.length)), 0, tab)
-    setTabs(next)
-    persist(next, act)
-  }, [])
+  /** A tab or a group dragged in the tab row: reorder, and move a dragged tab into or out of a group. */
+  const dropTab = useCallback((drag: DragItem, target: DropTarget) => {
+    const { tabs: cur, active: act, workspaces: ws } = stateRef.current
+    const r = dropInBar(cur, ws, drag, target)
+    if (!r) return
+    setTabs(r.tabs)
+    persist(r.tabs, act)
+    if (drag.kind !== 'tab' || r.group === undefined || wsOf(ws, drag.path)?.id === (r.group ?? undefined)) return
+    saveWorkspaces(r.group ? addRepos(ws, r.group, [drag.path]) : withoutRepos(ws, [drag.path]))
+  }, [saveWorkspaces])
 
   const selectTab = useCallback((path: string) => {
     setActive(path)
@@ -360,6 +360,32 @@ function Shell() {
     }
   }
 
+  /** Opens a repository (picked starting in the group's folder) and puts it in the group, next to its other tabs. */
+  const addRepoToWorkspace = async (w: Workspace) => {
+    const dir = await api.pickRepo(`Add a repository to ${w.name}`, w.folder)
+    if (!dir) return
+    let r: RepoSummary
+    try {
+      r = await api.openRepo(dir)
+    } catch (e) {
+      return void ui.toast(`Not a git repository: ${(e as Error).message}`, true)
+    }
+    const { tabs: cur, workspaces: ws } = stateRef.current
+    const existing = cur.find((t) => norm(t.path) === norm(r.path))
+    const tab = existing ?? r
+    const nextWs = addRepos(ws, w.id, [tab.path])
+    const g = nextWs.find((x) => x.id === w.id)
+    // Place the tab after the group's last tab in the row.
+    const others = cur.filter((t) => t !== existing)
+    const last = others.reduce((at, t, i) => (g && wsOf([g], t.path) ? i : at), -1)
+    const next = last === -1 ? [...others, tab] : [...others.slice(0, last + 1), tab, ...others.slice(last + 1)]
+    saveWorkspaces(nextWs)
+    if (w.collapsed) setCollapsed(w.id, false)
+    setTabs(next)
+    setActive(tab.path)
+    persist(next, tab.path)
+  }
+
   const changeFolder = async (w: Workspace) => {
     const f = await api.pickFolder(`Folder for ${w.name}'s terminals`)
     if (f) updateWorkspace(w.id, { folder: f })
@@ -369,6 +395,8 @@ function Shell() {
     ui.menu(e, [
       { label: `Open ${appSettings ? defaultProfile(appSettings).name : 'AI'} in ${w.name}`, action: () => openTerminal(undefined, w) },
       { label: 'Open shell here', action: () => openTerminal({ name: 'Shell', command: '' }, w) },
+      { separator: true, label: '' },
+      { label: 'Add repository…', action: () => { addRepoToWorkspace(w) } },
       { separator: true, label: '' },
       { label: 'Rename…', action: () => openPalette(nameStep('Rename', w.name, (name) => name && updateWorkspace(w.id, { name }))) },
       {
@@ -746,7 +774,7 @@ function Shell() {
           onGroupMenu={groupMenu}
           onTabMenu={tabMenu}
           onNew={() => api.pickRepo().then((d) => { if (d) openRepo(d) })}
-          onMove={moveTab}
+          onDrop={dropTab}
         />
       )}
       <div className="workarea">

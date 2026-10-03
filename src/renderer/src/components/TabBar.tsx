@@ -3,7 +3,7 @@ import type { AiState, RepoSummary, Workspace } from '@shared/types'
 import { AI_LABEL } from '../aiState'
 import { norm, useRuns } from '../runs'
 import { useUi } from '../ui'
-import { barItems, type BarItem } from '../workspaces'
+import { barItems, type BarItem, type DragItem, type DropTarget } from '../workspaces'
 
 const TAB_W = 168
 const BUTTONS_W = 76
@@ -16,8 +16,8 @@ interface Props {
   onSelect(path: string): void
   onClose(path: string): void
   onNew(): void
-  /** Move a tab to a new position in the tab order */
-  onMove(path: string, index: number): void
+  /** A tab or a group's chip was dragged and dropped beside another tab or chip */
+  onDrop(drag: DragItem, target: DropTarget): void
   /** Workspace ids the user collapsed; the others stay expanded */
   collapsed: string[]
   /** A collapsed group's chip was clicked: expand it and switch to that group */
@@ -36,12 +36,15 @@ const AiDot = ({ state }: { state: AiState | null }) => (state ? <span className
 /**
  * Repository tabs on their own row, grouped like browser tab groups: each workspace is a
  * colored chip. Groups stay expanded until their chip is clicked to collapse them. Tabs that don't fit live in the ▾ menu; the active tab is always visible.
+ * Tabs and chips drag to reorder; a dragged chip carries its whole group.
  */
-export function TabBar({ tabs, active, workspaces, collapsed, onSelect, onClose, onNew, onOpenGroup, onCollapseGroup, onGroupMenu, onTabMenu, repoAi, groupAi }: Props) {
+export function TabBar({ tabs, active, workspaces, collapsed, onSelect, onClose, onNew, onDrop, onOpenGroup, onCollapseGroup, onGroupMenu, onTabMenu, repoAi, groupAi }: Props) {
   const ui = useUi()
   const runs = useRuns()
   const ref = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(1200)
+  const [drag, setDrag] = useState<DragItem | null>(null)
+  const [over, setOver] = useState<DropTarget | null>(null)
 
   useEffect(() => {
     const el = ref.current
@@ -70,11 +73,45 @@ export function TabBar({ tabs, active, workspaces, collapsed, onSelect, onClose,
   const busy = (path: string) => runs.some((r) => norm(r.root) === norm(path) && r.endedAt === undefined)
   const groupBusy = (w: Workspace) => w.repos.some(busy)
 
+  /** Drag and drop handlers for one tab or chip; `at` builds the drop target from the pointer's side. */
+  const dnd = (item: DragItem, at: (before: boolean) => DropTarget) => ({
+    draggable: true,
+    onDragStart: (e: React.DragEvent) => {
+      e.dataTransfer.effectAllowed = 'move'
+      e.dataTransfer.setData('text/plain', item.kind === 'tab' ? item.path : item.id)
+      setDrag(item)
+    },
+    onDragOver: (e: React.DragEvent) => {
+      if (!drag) return
+      e.preventDefault()
+      e.stopPropagation()
+      e.dataTransfer.dropEffect = 'move'
+      const r = e.currentTarget.getBoundingClientRect()
+      const t = at(e.clientX < r.left + r.width / 2)
+      if (!over || key(over) !== key(t) || over.before !== t.before) setOver(t)
+    },
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      const r = e.currentTarget.getBoundingClientRect()
+      if (drag) onDrop(drag, at(e.clientX < r.left + r.width / 2))
+      setDrag(null)
+      setOver(null)
+    },
+    onDragEnd: () => {
+      setDrag(null)
+      setOver(null)
+    }
+  })
+  const key = (i: DragItem | DropTarget) => (i.kind === 'tab' ? `t:${i.path}` : `g:${i.id}`)
+  const dragClass = (i: DragItem) => `${over && key(over) === key(i) ? (over.before ? 'drop-before' : 'drop-after') : ''} ${drag && key(drag) === key(i) ? 'dragging' : ''}`
+
   const renderItem = (item: BarItem) =>
     item.kind === 'group' ? (
       <div
         key={`g:${item.ws.id}`}
-        className={`tab-group ${item.open ? 'open' : ''}`}
+        className={`tab-group ${item.open ? 'open' : ''} ${dragClass({ kind: 'group', id: item.ws.id })}`}
+        {...dnd({ kind: 'group', id: item.ws.id }, (before) => ({ kind: 'group', id: item.ws.id, before, open: item.open }))}
         style={{ '--group': `var(--lane-${item.ws.color})`, maxWidth: chipWidth(item.ws) } as React.CSSProperties}
         title={`${item.ws.name}: ${item.ws.repos.length} tab${item.ws.repos.length === 1 ? '' : 's'}\n${item.ws.folder}${item.open ? '\nClick to collapse' : '\nClick to open this workspace'}`}
         onClick={() => (item.open ? onCollapseGroup(item.ws) : onOpenGroup(item.ws))}
@@ -90,7 +127,8 @@ export function TabBar({ tabs, active, workspaces, collapsed, onSelect, onClose,
     ) : (
       <div
         key={item.tab.path}
-        className={`tab ${item.tab.path === active ? 'active' : ''} ${item.ws ? 'grouped' : ''}`}
+        className={`tab ${item.tab.path === active ? 'active' : ''} ${item.ws ? 'grouped' : ''} ${dragClass({ kind: 'tab', path: item.tab.path })}`}
+        {...dnd({ kind: 'tab', path: item.tab.path }, (before) => ({ kind: 'tab', path: item.tab.path, before }))}
         style={{ width: TAB_W, ...(item.ws ? ({ '--group': `var(--lane-${item.ws.color})` } as React.CSSProperties) : {}) }}
         title={item.tab.path}
         onMouseDown={(e) => {

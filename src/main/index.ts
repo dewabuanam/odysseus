@@ -7,6 +7,7 @@ import { HookService } from './git/hooks'
 import { GitRunner } from './git/runner'
 import { TerminalService } from './terminal'
 import { aiCommands } from './aiCommands'
+import { installAiSkills } from './aiSkills'
 import {
   addHistory,
   addRecent,
@@ -314,8 +315,8 @@ const appApi: Record<string, Handler> = {
       return []
     }
   },
-  pickRepo: async () => {
-    const r = await dialog.showOpenDialog(win!, { properties: ['openDirectory'] })
+  pickRepo: async (title?: string, defaultPath?: string) => {
+    const r = await dialog.showOpenDialog(win!, { properties: ['openDirectory'], title, defaultPath: defaultPath || undefined })
     return r.canceled ? null : r.filePaths[0]
   },
   openRepo: (dir: string) => openRepo(dir),
@@ -495,7 +496,14 @@ app.commandLine.appendSwitch('disable-smooth-scrolling')
 // Windows shows notifications under this id; it matches the installer's shortcut.
 if (process.platform === 'win32') app.setAppUserModelId('com.odysseus.git')
 
+// The installer runs `Odysseus --install-skills` to put the commit skill into each AI CLI.
+if (process.argv.includes('--install-skills')) {
+  installAiSkills()
+  app.exit(0)
+}
+
 app.whenReady().then(async () => {
+  installAiSkills()
   loadStore()
   await initEnv(getSettings())
   if (process.platform === 'darwin' && existsSync(iconPath)) app.dock?.setIcon(iconPath)

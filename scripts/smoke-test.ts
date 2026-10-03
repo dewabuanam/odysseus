@@ -2,9 +2,9 @@
 // Run with: npm test
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, chmodSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { HookEvent, Settings } from '../src/shared/types'
 import { buildEnv } from '../src/main/env'
 import { GitRunner } from '../src/main/git/runner'
@@ -15,6 +15,8 @@ import { parseSearch } from '../src/shared/search'
 import { mergeResult, parseConflicts } from '../src/shared/conflicts'
 import { aggregateAi } from '../src/shared/types'
 import { detectAiState } from '../src/renderer/src/aiState'
+import { dropInBar } from '../src/renderer/src/workspaces'
+import { installAiSkills } from '../src/main/aiSkills'
 
 const settings: Settings = {
   extraPath: [],
@@ -643,6 +645,58 @@ async function main() {
     assert.ok(r.length > 0 && r.every((c) => c.email === 't@example.com'), 'author:me uses user.email')
     r = await q('fix (a.b)')
     assert.ok(Array.isArray(r), 'special characters in plain words are literal')
+  })
+
+  await test('tab row drag and drop: reorder, join and leave groups, move whole groups', async () => {
+    const t = (p: string) => ({ path: p, name: p }) as never
+    const tabs = ['a', 'b', 'c', 'd', 'e'].map(t)
+    const ws = [{ id: 'g', name: 'G', color: 0, folder: '', repos: ['b', 'c'] }]
+    const order = (r: ReturnType<typeof dropInBar>) => r?.tabs.map((x: { path: string }) => x.path).join('')
+    // Within a group
+    let r = dropInBar(tabs, ws, { kind: 'tab', path: 'c' }, { kind: 'tab', path: 'b', before: true })
+    assert.equal(order(r), 'acbde')
+    assert.equal(r?.group, 'g')
+    // An ungrouped tab dropped among a group's tabs joins it
+    r = dropInBar(tabs, ws, { kind: 'tab', path: 'e' }, { kind: 'tab', path: 'b', before: false })
+    assert.equal(order(r), 'abecd')
+    assert.equal(r?.group, 'g')
+    // A grouped tab dropped outside leaves its group
+    r = dropInBar(tabs, ws, { kind: 'tab', path: 'b' }, { kind: 'tab', path: 'e', before: false })
+    assert.equal(order(r), 'acdeb')
+    assert.equal(r?.group, null)
+    // Right after an open group's chip: first tab of the group; before it: outside
+    r = dropInBar(tabs, ws, { kind: 'tab', path: 'd' }, { kind: 'group', id: 'g', before: false, open: true })
+    assert.equal(order(r), 'adbce')
+    assert.equal(r?.group, 'g')
+    r = dropInBar(tabs, ws, { kind: 'tab', path: 'd' }, { kind: 'group', id: 'g', before: true, open: true })
+    assert.equal(order(r), 'adbce')
+    assert.equal(r?.group, null)
+    // A group moves as a block, and never into the middle of another group
+    r = dropInBar(tabs, ws, { kind: 'group', id: 'g' }, { kind: 'tab', path: 'e', before: false })
+    assert.equal(order(r), 'adebc')
+    assert.equal(r?.group, undefined)
+    r = dropInBar(tabs, ws, { kind: 'group', id: 'g' }, { kind: 'tab', path: 'c', before: false })
+    assert.equal(r, null)
+    const ws2 = [...ws, { id: 'h', name: 'H', color: 1, folder: '', repos: ['d', 'e'] }]
+    r = dropInBar(tabs, ws2, { kind: 'group', id: 'h' }, { kind: 'tab', path: 'c', before: true })
+    assert.equal(order(r), 'adebc')
+  })
+
+  await test('AI skills: commit skill for each CLI, user files kept, no AI attribution', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'ody-home-'))
+    const own = join(home, '.gemini', 'commands', 'commit.toml')
+    mkdirSync(dirname(own), { recursive: true })
+    writeFileSync(own, 'prompt = "mine"\n')
+    const written = installAiSkills(home)
+    assert.equal(written.length, 3, written.join(', '))
+    const claude = readFileSync(join(home, '.claude', 'skills', 'commit', 'SKILL.md'), 'utf8')
+    assert.match(claude, /^---\nname: commit\ndescription: /)
+    assert.match(claude, /Co-Authored-By/)
+    assert.ok(existsSync(join(home, '.codex', 'prompts', 'commit.md')))
+    assert.ok(existsSync(join(home, '.copilot', 'skills', 'commit', 'SKILL.md')))
+    assert.equal(readFileSync(own, 'utf8'), 'prompt = "mine"\n', "the user's own command is kept")
+    assert.equal(installAiSkills(home).length, 0, 'unchanged files are not rewritten')
+    rmSync(home, { recursive: true, force: true })
   })
 
   rmSync(dir, { recursive: true, force: true })

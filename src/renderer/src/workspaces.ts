@@ -80,3 +80,63 @@ export function barItems(tabs: RepoSummary[], ws: Workspace[], active: string | 
   }
   return out
 }
+
+/** Tabs in the order the tab row shows them: each group's tabs together, where its first tab is. */
+export function displayOrder(tabs: RepoSummary[], ws: Workspace[]): RepoSummary[] {
+  return barItems(tabs, ws, null, []).flatMap((i) => (i.kind === 'tab' ? [i.tab] : []))
+}
+
+/** What a drag in the tab row carries, and where it is dropped. */
+export type DragItem = { kind: 'tab'; path: string } | { kind: 'group'; id: string }
+export type DropTarget = { kind: 'tab'; path: string; before: boolean } | { kind: 'group'; id: string; before: boolean; open: boolean }
+
+/**
+ * Result of a tab row drop: the new tab order and the group the dragged tab ends up in
+ * (null: no group; undefined: unchanged, which is always the case for a dragged group).
+ * Like browser tab groups, a tab dropped among a group's tabs joins it, and one dropped
+ * outside every group leaves its own. A dragged group moves as one block and never lands
+ * inside another group.
+ */
+export function dropInBar(tabs: RepoSummary[], ws: Workspace[], drag: DragItem, target: DropTarget): { tabs: RepoSummary[]; group?: string | null } | null {
+  const order = displayOrder(tabs, ws)
+  const groupPaths = (id: string) => order.filter((t) => wsOf(ws.filter((w) => w.id === id), t.path)).map((t) => t.path)
+  const moving = drag.kind === 'tab' ? [drag.path] : groupPaths(drag.id)
+  if (!moving.length) return null
+
+  let anchor: string[]
+  let before = target.before
+  let group: string | null | undefined
+  if (target.kind === 'tab') {
+    const tw = wsOf(ws, target.path)
+    if (drag.kind === 'group') {
+      if (tw?.id === drag.id) return null
+      anchor = tw ? groupPaths(tw.id) : [target.path]
+    } else {
+      if (target.path === drag.path) return null
+      anchor = [target.path]
+      group = tw?.id ?? null
+    }
+  } else {
+    if (drag.kind === 'group' && target.id === drag.id) return null
+    const members = groupPaths(target.id)
+    if (drag.kind === 'tab' && !before && target.open) {
+      // Just after an open group's chip: the group's first tab.
+      anchor = members.slice(0, 1)
+      before = true
+      group = target.id
+    } else {
+      anchor = members
+      if (drag.kind === 'tab') group = null
+    }
+  }
+
+  const rest = order.filter((t) => !moving.includes(t.path))
+  const at = anchor.filter((p) => !moving.includes(p))
+  if (!at.length) {
+    // Dropped against itself (a group's only tab beside its own chip): only the group can change.
+    return group === undefined ? null : { tabs: order, group }
+  }
+  const i = before ? rest.findIndex((t) => t.path === at[0]) : rest.findIndex((t) => t.path === at[at.length - 1]) + 1
+  const moved = order.filter((t) => moving.includes(t.path))
+  return { tabs: [...rest.slice(0, i), ...moved, ...rest.slice(i)], group }
+}

@@ -578,3 +578,12 @@ body:has(.overlay, .palette-overlay) .titlebar * { -webkit-app-region: no-drag; 
 .sb-item:hover .sb-ref.branch, .sb-item.active .sb-ref.branch { border-color: var(--ref-lane, var(--ink)); color: var(--ref-lane, var(--ink)); }
 .sb-item:hover .sb-ref.remote, .sb-item.active .sb-ref.remote { border-color: var(--ref-lane, var(--ink)); border-style: dashed; color: var(--ref-lane, var(--ink-2)); }
 .sb-item .sb-ref.branch.head { background: var(--ref-lane, var(--ink)); border-color: var(--ref-lane, var(--ink)); color: var(--paper); }
+
+/* ---------- tab row drag and drop: a bar marks where the dragged tab or group lands */
+.tab.dragging, .tab-group.dragging { opacity: 0.45; }
+.tab.drop-before, .tab.drop-after, .tab-group.drop-before, .tab-group.drop-after { overflow: visible; }
+.tab.drop-before::before, .tab.drop-after::before, .tab-group.drop-before::before, .tab-group.drop-after::before {
+  content: ''; position: absolute; top: 2px; bottom: 2px; width: 3px; border-radius: 2px; background: var(--ink); pointer-events: none; z-index: 2;
+}
+.tab.drop-before::before, .tab-group.drop-before::before { left: -3px; }
+.tab.drop-after::before, .tab-group.drop-after::before { right: -3px; }
