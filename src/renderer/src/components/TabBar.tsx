@@ -31,7 +31,7 @@ interface Props {
   groupAi(w: Workspace): AiState | null
 }
 
-const AiDot = ({ state }: { state: AiState | null }) => (state ? <span className={`ai-dot ai-${state}`} title={`AI ${AI_LABEL[state]}`} /> : null)
+const AiDot = ({ state }: { state: AiState | null }) => (state ? <span className={`ai-dot ai-${state}`} title={`Sessions: ${AI_LABEL[state]}`} /> : null)
 
 /**
  * Repository tabs on their own row, grouped like browser tab groups: each workspace is a

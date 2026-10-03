@@ -146,7 +146,7 @@ const terminals = new TerminalService({
 // ------------------------------------------------------------------ AI status on the taskbar
 
 const AI_COLORS: Record<AiState, [number, number, number]> = { waiting: [217, 58, 50], working: [224, 164, 0], idle: [47, 154, 79] }
-const AI_TEXT: Record<AiState, string> = { waiting: 'AI needs your input', working: 'AI working', idle: 'AI idle' }
+const AI_TEXT: Record<AiState, string> = { waiting: 'A session needs your input', working: 'Sessions working', idle: 'Sessions idle' }
 let aiStatus: AiState | null = null
 
 /** A filled circle with a light ring, as a 16x16 BGRA bitmap for the taskbar overlay. */
@@ -358,6 +358,8 @@ const appApi: Record<string, Handler> = {
   aiCommands: (command: string, cwd: string) => aiCommands(command, cwd),
   setAiStatus: (state: AiState | null, badge?: string | null, working?: number) => setAiStatus(state, badge, working),
   platform: () => process.platform,
+  /** Installed from the Microsoft Store, which keeps it up to date */
+  isStore: () => process.windowsStore === true,
   windowMinimize: () => win?.minimize(),
   windowToggleMaximize: () => (win?.isMaximized() ? win.unmaximize() : win?.maximize()),
   windowClose: () => win?.close(),

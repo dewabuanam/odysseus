@@ -10,9 +10,19 @@ export function Welcome({ onOpen, onWorkspace }: { onOpen(dir: string): void; on
   const ui = useUi()
   const [recent, setRecent] = useState<RepoSummary[]>([])
   const [busy, setBusy] = useState(false)
+  /** What's wrong with Git on this computer, if anything: missing, or older than Odysseus needs */
+  const [gitProblem, setGitProblem] = useState<string | null>(null)
 
   useEffect(() => {
     api.recentRepos().then(setRecent)
+    api.diagnostics().then(
+      (d) => {
+        const m = /git version (\d+)\.(\d+)/.exec(d.gitVersion)
+        if (!m) setGitProblem("Git isn't installed, and Odysseus needs it.")
+        else if (+m[1] < 2 || (+m[1] === 2 && +m[2] < 36)) setGitProblem(`Git ${m[1]}.${m[2]} is too old; Odysseus needs 2.36 or newer.`)
+      },
+      () => {}
+    )
   }, [])
 
   const guard = async (fn: () => Promise<RepoSummary | null>) => {
@@ -37,6 +47,24 @@ export function Welcome({ onOpen, onWorkspace }: { onOpen(dir: string): void; on
         <img src={logo} alt="Odysseus" />
         <h1>ODYSSEUS</h1>
         <div className="tag">A Git client that takes your hooks seriously.</div>
+        {gitProblem && (
+          <div className="welcome-git">
+            {gitProblem} Install Git for Windows, then restart Odysseus.
+            <div className="row" style={{ justifyContent: 'center', marginTop: 8 }}>
+              <button className="btn small primary" onClick={() => api.openUrl('https://git-scm.com/download/win')}>Download Git</button>
+              <button
+                className="btn small"
+                title="Copy a command that installs Git from a terminal"
+                onClick={() => {
+                  navigator.clipboard.writeText('winget install --id Git.Git -e')
+                  ui.toast('Copied: winget install --id Git.Git -e')
+                }}
+              >
+                Copy winget command
+              </button>
+            </div>
+          </div>
+        )}
         <div className="row" style={{ justifyContent: 'center' }}>
           <button className="btn primary" disabled={busy} onClick={async () => { const d = await api.pickRepo(); if (d) onOpen(d) }}>
             Open repository

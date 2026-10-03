@@ -11,6 +11,7 @@ import type {
   Workspace
 } from '@shared/types'
 import { aggregateAi, type AiCommand, type AiState } from '@shared/types'
+import { AI_LABEL } from './aiState'
 import { api } from './api'
 import { ranked } from './commands'
 import { bindingsFor, KEYMAP_NAMES } from './keymaps'
@@ -24,7 +25,7 @@ import { AboutDialog, HOMEPAGE } from './components/AboutDialog'
 import { TabBar } from './components/TabBar'
 import { TitleBar } from './components/TitleBar'
 import { Welcome } from './components/Welcome'
-import { defaultProfile, hasRemote, TerminalPane, type TerminalHandle, type TermScope } from './components/TerminalPane'
+import { defaultProfile, hasRemote, TerminalPane, type OpenSession, type TerminalHandle, type TermScope } from './components/TerminalPane'
 import { addRepos, commonFolder, dropInBar, newId, nextColor, prune, withoutRepos, wsOf, LANE_COUNT, type DragItem, type DropTarget } from './workspaces'
 
 const AI_BADGE: Record<AiState, string> = { waiting: '#d93a32', working: '#e0a400', idle: '#2f9a4f' }
@@ -94,6 +95,11 @@ function Shell() {
   const [aboutOpen, setAboutOpen] = useState(false)
   const [theme, setTheme] = useState<'dark' | 'light'>('light')
   const [keymap, setKeymap] = useState<Keymap>('default')
+  /** Installed from the Microsoft Store: the Store updates it, so there's no releases page to check */
+  const [isStore, setIsStore] = useState(false)
+  useEffect(() => {
+    api.isStore().then(setIsStore, () => {})
+  }, [])
   const [workspaces, setWorkspacesState] = useState<Workspace[]>([])
   const [appSettings, setAppSettings] = useState<Settings | null>(null)
   const [termOpen, setTermOpen] = useState(false)
@@ -498,6 +504,62 @@ function Shell() {
     }))
   }
 
+  /** Where a session runs, as the palette names it: "odysseus in workspace Tools", "workspace Tools". */
+  const placeName = (scope: string): string => {
+    const { tabs: cur, workspaces: ws } = stateRef.current
+    if (scope.startsWith('ws:')) return `workspace ${ws.find((w) => `ws:${w.id}` === scope)?.name ?? ''}`
+    const t = cur.find((x) => repoScope(x).key === scope)
+    const w = t && wsOf(ws, t.path)
+    return `${t?.name ?? ''}${w ? ` in workspace ${w.name}` : ''}`
+  }
+
+  /** Opens the tab or workspace a session runs in, shows the pane and brings the session into view. */
+  const gotoSession = (s: OpenSession) => {
+    const { tabs: cur, workspaces: ws } = stateRef.current
+    const w = s.scope.startsWith('ws:') ? ws.find((x) => `ws:${x.id}` === s.scope) : undefined
+    const t = w ? undefined : cur.find((x) => repoScope(x).key === s.scope)
+    if (w && !wsOf([w], stateRef.current.active)) openWorkspace(w)
+    if (t) {
+      setActive(t.path)
+      persist(cur, t.path)
+    }
+    setTermUsed(true)
+    setTermOpen(true)
+    setTimeout(() => withPane((h) => h.focus(s.key)), 30)
+  }
+
+  const stateNote = (a: AiState | null) => (a ? AI_LABEL[a] : undefined)
+  const tabDetail = (t: RepoSummary) => {
+    const w = wsOf(stateRef.current.workspaces, t.path)
+    return [w && `workspace ${w.name}`, stateNote(repoAi(t.path)), t.path].filter(Boolean).join(' · ')
+  }
+
+  /** One palette entry per open shell or AI session, named with the repository or workspace it runs in. */
+  const sessionCommands = (): Cmd[] =>
+    (termRef.current?.sessions() ?? []).map((s) => ({
+      id: `session.goto.${s.key}`,
+      title: `${s.shell ? 'Terminal' : 'AI'}: Go to ${s.title} in ${placeName(s.scope)}`,
+      detail: s.exited ? 'exited' : stateNote(s.ai),
+      run: () => gotoSession(s)
+    }))
+
+  /** Everything open in one list: tabs, workspaces, and the shells and AIs running in them. */
+  const gotoStep = (): Step => ({
+    kind: 'list',
+    title: 'Go to',
+    placeholder: 'Open tab, workspace, shell or AI',
+    items: [
+      ...stateRef.current.tabs.map((t, i) => ({ id: `goto.tab.${t.path}`, title: t.name, detail: `tab · ${tabDetail(t)}`, run: () => switchTab({ index: i }) })),
+      ...stateRef.current.workspaces.map((w) => ({ id: `goto.ws.${w.id}`, title: w.name, detail: [`workspace · ${w.repos.length} tab(s)`, stateNote(groupAi(w))].filter(Boolean).join(' · '), run: () => openWorkspace(w) })),
+      ...(termRef.current?.sessions() ?? []).map((s) => ({
+        id: `goto.session.${s.key}`,
+        title: `${s.title} in ${placeName(s.scope)}`,
+        detail: [s.shell ? 'shell' : 'AI', s.exited ? 'exited' : stateNote(s.ai)].filter(Boolean).join(' · '),
+        run: () => gotoSession(s)
+      }))
+    ]
+  })
+
   const toggleTerminal = () => {
     if (termOpen) return setTermOpen(false)
     setTermUsed(true)
@@ -514,7 +576,8 @@ function Shell() {
     { id: 'tab.close', title: 'Tab: Close Tab', when: !!stateRef.current.active, run: () => closeTab() },
     { id: 'tab.next', title: 'Tab: Next Tab', when: stateRef.current.tabs.length > 1, run: () => switchTab(1) },
     { id: 'tab.prev', title: 'Tab: Previous Tab', when: stateRef.current.tabs.length > 1, run: () => switchTab(-1) },
-    ...stateRef.current.tabs.map((t, i) => ({ id: `tab.goto.${t.path}`, title: `Tab: Switch to ${t.name}`, detail: t.path, when: t.path !== stateRef.current.active, run: () => switchTab({ index: i }) })),
+    { id: 'app.goto', title: 'Go to: Open Tab, Workspace, Shell or AI…', detail: 'anything already open', run: () => gotoStep() },
+    ...stateRef.current.tabs.map((t, i) => ({ id: `tab.goto.${t.path}`, title: `Tab: Switch to ${t.name}`, detail: tabDetail(t), when: t.path !== stateRef.current.active, run: () => switchTab({ index: i }) })),
     { id: 'repo.open', title: 'Repository: Open…', run: () => { api.pickRepo().then((d) => { if (d) openRepo(d) }) } },
 
     // AI and terminal pane
@@ -543,6 +606,7 @@ function Shell() {
       run: () => withPane((h) => h.toggleRemoteDefault())
     },
     ...aiSlashCommands(),
+    ...sessionCommands(),
     { id: 'term.shell', title: 'Terminal: New Shell', when: !!stateRef.current.active, run: () => openTerminal({ name: 'Shell', command: '' }) },
     { id: 'view.terminal', title: 'View: Toggle AI / Terminal Pane', when: !!stateRef.current.active, run: () => toggleTerminal() },
     {
@@ -570,7 +634,7 @@ function Shell() {
     { id: 'ws.new', title: 'Workspace: New from Folder…', detail: 'opens every repository in a folder as one group', run: () => { newWorkspaceFromFolder() } },
     { id: 'ws.add', title: 'Workspace: Add Tab to Workspace…', when: !!stateRef.current.active, run: () => addToWorkspaceStep(stateRef.current.active!) },
     { id: 'ws.remove', title: `Workspace: Remove Tab from ${activeWs?.name ?? ''}`, when: !!activeWs, run: () => saveWorkspaces(withoutRepos(stateRef.current.workspaces, [stateRef.current.active!])) },
-    ...workspaces.filter((w) => w.id !== activeWs?.id).map((w) => ({ id: `ws.goto.${w.id}`, title: `Workspace: Switch to ${w.name}`, detail: `${w.repos.length} tab(s)`, run: () => openWorkspace(w) })),
+    ...workspaces.filter((w) => w.id !== activeWs?.id).map((w) => ({ id: `ws.goto.${w.id}`, title: `Workspace: Switch to ${w.name}`, detail: [`${w.repos.length} tab(s)`, stateNote(groupAi(w))].filter(Boolean).join(' · '), run: () => openWorkspace(w) })),
     { id: 'tab.rename', title: 'Tab: Rename Repository…', detail: 'a name for it in Odysseus; the folder stays as it is', when: !!stateRef.current.active, run: () => aliasStep(stateRef.current.active!) },
     { id: 'ws.rename', title: 'Workspace: Rename…', when: !!activeWs, run: () => nameStep('Rename', activeWs!.name, (name) => name && updateWorkspace(activeWs!.id, { name })) },
     { id: 'ws.folder', title: 'Workspace: Change Folder…', detail: activeWs?.folder, when: !!activeWs, run: () => { changeFolder(activeWs!) } },
@@ -598,7 +662,7 @@ function Shell() {
       })
     },
     { id: 'help.about', title: 'Help: About Odysseus', detail: 'version, Git and runtime versions', run: () => setAboutOpen(true) },
-    { id: 'help.releases', title: 'Help: Check for Updates', detail: 'opens the releases page', run: () => { api.openUrl(`${HOMEPAGE}/releases`) } },
+    { id: 'help.releases', title: 'Help: Check for Updates', detail: 'opens the releases page', when: !isStore, run: () => { api.openUrl(`${HOMEPAGE}/releases`) } },
     { id: 'help.homepage', title: 'Help: Odysseus on GitHub', run: () => { api.openUrl(HOMEPAGE) } },
     { id: 'app.shortcuts', title: 'Preferences: Keyboard Shortcuts', detail: KEYMAP_NAMES[keymap], run: () => shortcutsStep() }
   ]

@@ -79,6 +79,7 @@ export const api = {
   aiCommands: (command: string, cwd: string) => call<AiCommand[]>('aiCommands', command, cwd),
   setAiStatus: (state: AiState | null, badge: string | null, working: number) => call<void>('setAiStatus', state, badge, working),
   platform: () => call<string>('platform'),
+  isStore: () => call<boolean>('isStore'),
   windowMinimize: () => call<void>('windowMinimize'),
   windowToggleMaximize: () => call<void>('windowToggleMaximize'),
   windowClose: () => call<void>('windowClose'),

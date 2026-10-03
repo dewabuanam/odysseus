@@ -34,4 +34,24 @@ export function detectAiState(screen: string, lastOutputAt: number, now = Date.n
   return now - lastOutputAt < QUIET_MS ? 'working' : 'idle'
 }
 
+/** A shell's prompt at the start of the cursor line: PowerShell, cmd, or a Unix shell. */
+const PROMPT = [/^PS [^>]*> ?/, /^[A-Za-z]:\\[^>]*>/, /^\S*@\S*[:\s].*[$#%] /, /^[$#%❯›>] /]
+/** What a command running in a shell asks before it goes on. */
+const SHELL_ASKS = [/\[Y\] Yes/, /\(y\/n\)\??\s*$/im, /press any key/i, /(password|passphrase)( for [^:]*)?:\s*$/im]
+
+/**
+ * Reads a shell's state: idle at its prompt (and before anything was run), needs you when the
+ * command running asks something, working otherwise.
+ */
+export function detectShellState(term: Terminal, ran: boolean): AiState {
+  if (!ran) return 'idle'
+  const buf = term.buffer.active
+  const line = buf.getLine(buf.baseY + buf.cursorY)?.translateToString(false) ?? ''
+  const beforeCursor = line.slice(0, buf.cursorX)
+  if (PROMPT.some((r) => r.test(line)) || /[$#%❯›>] $/.test(beforeCursor)) return 'idle'
+  const tail = visibleText(term).trimEnd().split('\n').slice(-5).join('\n')
+  if (SHELL_ASKS.some((r) => r.test(tail)) || NEEDS_ACTION.some((r) => r.test(tail))) return 'waiting'
+  return 'working'
+}
+
 export const AI_LABEL: Record<AiState, string> = { working: 'working', waiting: 'needs your input', idle: 'idle' }

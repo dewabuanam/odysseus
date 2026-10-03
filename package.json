@@ -14,7 +14,9 @@
     "test": "esbuild scripts/smoke-test.ts --bundle --platform=node --format=esm --outfile=out/smoke-test.mjs --alias:@shared=./src/shared --log-level=warning && node out/smoke-test.mjs",
     "dist": "npm run build && electron-builder",
     "dist:portable": "npm run build && electron-builder --win portable",
-    "dist:win": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dist-win.ps1"
+    "dist:win": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dist-win.ps1",
+    "dist:store": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dist-store.ps1",
+    "dist:store:test": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dist-store.ps1 -Test"
   },
   "build": {
     "appId": "com.odysseus.git",
@@ -26,7 +28,8 @@
     },
     "files": [
       "out/**/*",
-      "resources/**/*"
+      "resources/**/*",
+      "!resources/appx/**"
     ],
     "win": {
       "target": [
@@ -61,6 +64,21 @@
       "shortcutName": "Odysseus",
       "include": "installer/installer.nsh",
       "artifactName": "Odysseus-${version}-setup.exe"
+    },
+    "appx": {
+      "applicationId": "Odysseus",
+      "displayName": "Odysseus Git",
+      "identityName": "FoundyWorks.OdysseusGit",
+      "publisher": "CN=D7547B4A-CFE8-415C-BC38-F746BE9E8FF3",
+      "publisherDisplayName": "Foundy Works",
+      "backgroundColor": "#f6f3ec",
+      "languages": [
+        "en-US"
+      ],
+      "minVersion": "10.0.19041.0",
+      "maxVersionTested": "10.0.26100.0",
+      "customManifestPath": "appx/appxmanifest.xml",
+      "artifactName": "Odysseus-${version}.appx"
     },
     "asarUnpack": [
       "node_modules/node-pty/**"

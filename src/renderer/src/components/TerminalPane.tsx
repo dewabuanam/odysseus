@@ -3,7 +3,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { aggregateAi, programOf, remoteControlFor, type AiPaneState, type AiState, type Settings, type TerminalProfile } from '@shared/types'
-import { AI_LABEL, detectAiState, visibleText } from '../aiState'
+import { AI_LABEL, detectAiState, detectShellState, visibleText } from '../aiState'
 import { api } from '../api'
 import { useUi } from '../ui'
 import { RemoteControlDialog } from './RemoteControlDialog'
@@ -27,6 +27,21 @@ export interface TerminalHandle {
   toggleRemote(): void
   /** Turns the default Remote Control for every repository and workspace on or off. */
   toggleRemoteDefault(): void
+  /** Every open session, in every repository and workspace. */
+  sessions(): OpenSession[]
+  /** Brings a session into view; its repository or workspace must be the one open. */
+  focus(key: number): void
+}
+
+/** An open session as the rest of the app sees it. */
+export interface OpenSession {
+  key: number
+  title: string
+  /** The scope key it runs in: `repo:<path>` or `ws:<id>` */
+  scope: string
+  shell: boolean
+  ai: AiState | null
+  exited: boolean
 }
 
 interface Session {
@@ -38,7 +53,7 @@ interface Session {
   title: string
   profile: TerminalProfile
   exited: boolean
-  /** AI sessions only: what the program is doing */
+  /** What the program is doing: an AI, or the command running in a shell */
   ai: AiState | null
   /** Started ahead of time in the background; becomes a real session when the AI is opened */
   spare?: boolean
@@ -162,7 +177,7 @@ export function TerminalPane({ scopes, live, ready, open, wanted = open, onClose
       }
       const key = nextKey++
       const remote = profile !== base
-      setSessions((s) => [...s, { key, sid: uuid(), scope: sc.key, cwd: sc.cwd, title: profile.command ? base.name : shellName, profile, exited: false, ai: profile.command ? 'working' : null, remote }])
+      setSessions((s) => [...s, { key, sid: uuid(), scope: sc.key, cwd: sc.cwd, title: profile.command ? base.name : shellName, profile, exited: false, ai: profile.command ? 'working' : 'idle', remote }])
       setActiveBy((a) => ({ ...a, [sc.key]: key }))
       return key
     },
@@ -236,8 +251,8 @@ export function TerminalPane({ scopes, live, ready, open, wanted = open, onClose
     }, 2500)
     return () => clearTimeout(t)
   }, [scope?.key, scope?.cwd, prewarm?.name, prewarm?.command])
-  const live$ = useRef({ start, scopes, scope, mine, active, toggleRemote, toggleRemoteDefault })
-  live$.current = { start, scopes, scope, mine, active, toggleRemote, toggleRemoteDefault }
+  const live$ = useRef({ start, scopes, scope, mine, active, sessions, toggleRemote, toggleRemoteDefault })
+  live$.current = { start, scopes, scope, mine, active, sessions, toggleRemote, toggleRemoteDefault }
 
   useImperativeHandle(ref, () => ({
     start: async (profile, kind) => {
@@ -264,7 +279,15 @@ export function TerminalPane({ scopes, live, ready, open, wanted = open, onClose
       if (key !== undefined) queue(key, text)
     },
     toggleRemote: () => live$.current.toggleRemote(),
-    toggleRemoteDefault: () => live$.current.toggleRemoteDefault()
+    toggleRemoteDefault: () => live$.current.toggleRemoteDefault(),
+    sessions: () =>
+      live$.current.sessions.filter((x) => !x.spare).map((x) => ({ key: x.key, title: x.title, scope: x.scope, shell: !x.profile.command, ai: x.ai, exited: x.exited })),
+    focus: (key) => {
+      const s = live$.current.sessions.find((x) => x.key === key)
+      if (!s) return
+      setPreferRepo(s.scope.startsWith('repo:'))
+      setActiveBy((a) => ({ ...a, [s.scope]: key }))
+    }
   }), [loadSettings])
 
   // The sessions left open last time, for the repositories and workspaces still open.
@@ -273,7 +296,7 @@ export function TerminalPane({ scopes, live, ready, open, wanted = open, onClose
     if (!ready || restored.current) return
     api.getAiPane().then(
       (saved) => {
-        const back: Session[] = saved.sessions.filter((x) => live.includes(x.scope)).map((x) => ({ ...x, key: nextKey++, sid: x.id, exited: false, ai: x.profile.command ? 'working' : null }))
+        const back: Session[] = saved.sessions.filter((x) => live.includes(x.scope)).map((x) => ({ ...x, key: nextKey++, sid: x.id, exited: false, ai: x.profile.command ? 'working' : 'idle' }))
         const act: Record<string, number> = {}
         for (const [sc, id] of Object.entries(saved.active)) {
           const k = back.find((x) => x.sid === id && x.scope === sc)?.key
@@ -332,6 +355,13 @@ export function TerminalPane({ scopes, live, ready, open, wanted = open, onClose
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aiKey])
 
+  /** Most urgent state of a repository's or workspace's sessions, for its dot in the header */
+  const scopeAi = (key: string) => aggregateAi(sessions.filter((x) => x.scope === key && !x.spare).map((x) => x.ai))
+  const ScopeDot = ({ k }: { k: string }) => {
+    const a = scopeAi(k)
+    return a ? <span className={`ai-dot ai-${a}`} title={`Sessions here: ${AI_LABEL[a]}`} /> : null
+  }
+
   const profiles = settings?.terminalProfiles.filter((p) => p.command.trim()) ?? []
   const choices = [{ ...SHELL, name: shellName }, ...profiles]
   const isDefault = (p: TerminalProfile) => (settings?.terminalDefault ?? '') === p.name || (!p.command && settings?.terminalDefault === 'Shell')
@@ -368,12 +398,18 @@ export function TerminalPane({ scopes, live, ready, open, wanted = open, onClose
             <div className="term-scope" title="Where new sessions start">
               {scopes.map((s) => (
                 <button key={s.key} className={s.key === scope?.key ? 'on' : ''} onClick={() => setPreferRepo(s.kind === 'repo')} title={s.cwd}>
+                  <ScopeDot k={s.key} />
                   {s.kind === 'workspace' ? 'Workspace' : 'Repository'}
                 </button>
               ))}
             </div>
           ) : (
-            scope && <span className="term-cwd ellipsis" title={scope.cwd}>{scope.label}</span>
+            scope && (
+              <span className="term-cwd" title={scope.cwd}>
+                <ScopeDot k={scope.key} />
+                <span className="ellipsis">{scope.label}</span>
+              </span>
+            )
           )}
           <span className="grow" />
           {settings && (hasRemote(defaultProfile(settings)) || mine.some((x) => hasRemote(x.profile))) && (
@@ -418,7 +454,7 @@ export function TerminalPane({ scopes, live, ready, open, wanted = open, onClose
         )}
         <div className="term-body">
           {sessions.map((s) => (
-            <TermView key={s.key} cwd={s.cwd} profile={s.profile} sessionId={s.sid} visible={open && s.scope === scope?.key && s.key === active} onExit={() => onExit(s.key)} onAi={s.profile.command ? (a) => onAi(s.key, a) : undefined} pull={() => outbox.current.get(s.key)?.shift()} />
+            <TermView key={s.key} cwd={s.cwd} profile={s.profile} sessionId={s.sid} visible={open && s.scope === scope?.key && s.key === active} onExit={() => onExit(s.key)} shell={!s.profile.command} onAi={(a) => onAi(s.key, a)} pull={() => outbox.current.get(s.key)?.shift()} />
           ))}
           {mine.length === 0 && (
             <div className="term-empty">
@@ -446,13 +482,15 @@ interface TermViewProps {
   /** Conversation id for Claude Code: started with it the first time, resumed after that */
   sessionId?: string
   visible: boolean
+  /** A plain shell: its state comes from its prompt instead of an AI's screen */
+  shell?: boolean
   onExit(): void
   onAi?(state: AiState): void
   /** Next text to type in once the program is ready for input */
   pull?(): string | undefined
 }
 
-function TermView({ cwd, profile, sessionId, visible, onExit, onAi, pull }: TermViewProps) {
+function TermView({ cwd, profile, sessionId, visible, shell, onExit, onAi, pull }: TermViewProps) {
   const host = useRef<HTMLDivElement>(null)
   const ref = useRef<{ term: Terminal; fit: FitAddon; id: number | null } | null>(null)
   const onExitRef = useRef(onExit)
@@ -479,6 +517,8 @@ function TermView({ cwd, profile, sessionId, visible, onExit, onAi, pull }: Term
     let disposed = false
     let pending = ''
     let lastOutputAt = Date.now()
+    /** A shell has run a command: until then it is idle, whatever it prints while starting */
+    let ran = false
 
     // Ctrl+C copies when text is selected; otherwise it interrupts like any terminal.
     term.attachCustomKeyEventHandler((e) => {
@@ -508,6 +548,7 @@ function TermView({ cwd, profile, sessionId, visible, onExit, onAi, pull }: Term
       }
     })
     const input = term.onData((d) => {
+      if (d.includes('\r')) ran = true
       if (state.id !== null) api.termWrite(state.id, d)
       else pending += d
     })
@@ -537,11 +578,13 @@ function TermView({ cwd, profile, sessionId, visible, onExit, onAi, pull }: Term
       }
     })
     ro.observe(host.current!)
-    // AI sessions: read the screen a few times a second to tell working / needs you / idle.
+    // Read the screen a few times a second to tell working / needs you / idle: an AI from its
+    // own cues, a shell from whether it sits at its prompt.
     // Queued text (a slash command from the palette) is typed in once the AI sits idle at its
     // prompt, so it isn't lost while the program boots or asks something first.
     const watch = setInterval(() => {
       if (!onAiRef.current || state.id === null) return
+      if (shell) return onAiRef.current(detectShellState(term, ran))
       const ai = detectAiState(visibleText(term), lastOutputAt)
       onAiRef.current(ai)
       const text = ai === 'idle' ? pullRef.current?.() : undefined
