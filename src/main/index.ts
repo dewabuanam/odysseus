@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, shell } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, powerSaveBlocker, shell } from 'electron'
 import { existsSync, mkdirSync, readdirSync, watch, type FSWatcher } from 'node:fs'
 import { join } from 'node:path'
 import { buildEnv, diagnostics, envPath, initEnv } from './env'
@@ -210,6 +210,23 @@ function notifyAiStatus(prev: AiState | null, state: AiState | null, working: nu
   n.show()
 }
 
+// ------------------------------------------------------------------ keep awake while an AI works
+
+let awakeId: number | null = null
+
+/**
+ * While an AI session works, Windows counts no input from you as idle and may turn off the
+ * display and lock. This keeps the display on and the PC awake until every AI session stops
+ * working; shells running a command don't count.
+ */
+function keepAwake(on: boolean): void {
+  if (on && awakeId === null) awakeId = powerSaveBlocker.start('prevent-display-sleep')
+  else if (!on && awakeId !== null) {
+    powerSaveBlocker.stop(awakeId)
+    awakeId = null
+  }
+}
+
 // ------------------------------------------------------------------ open repositories (tabs)
 
 /**
@@ -364,6 +381,7 @@ const appApi: Record<string, Handler> = {
   termKill: (id: number) => terminals.kill(id),
   aiCommands: (command: string, cwd: string) => aiCommands(command, cwd),
   setAiStatus: (state: AiState | null, badge?: string | null, working?: number) => setAiStatus(state, badge, working),
+  keepAwake: (on: boolean) => keepAwake(on),
   platform: () => process.platform,
   /** Installed from the Microsoft Store, which keeps it up to date */
   isStore: () => process.windowsStore === true,

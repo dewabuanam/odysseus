@@ -107,6 +107,8 @@ function Shell() {
   const [termUsed, setTermUsed] = useState(true)
   const [aiStates, setAiStates] = useState<Record<string, AiState>>({})
   const [aiWorking, setAiWorking] = useState(0)
+  /** An AI session (not a shell) is working: Windows must not go idle and lock meanwhile */
+  const [aiBusy, setAiBusy] = useState(false)
   /** Slash commands the default AI offers where the AI pane opens */
   const [aiCmds, setAiCmds] = useState<AiCommand[]>([])
   const termRef = useRef<TerminalHandle>(null)
@@ -555,6 +557,9 @@ function Shell() {
   useEffect(() => {
     api.setAiStatus(overallAi, overallAi ? aiBadge(overallAi, aiWorking) : null, aiWorking)
   }, [overallAi, aiWorking])
+  useEffect(() => {
+    api.keepAwake(aiBusy)
+  }, [aiBusy])
 
   /** Runs `fn` once the pane has mounted (the first open mounts it), instead of guessing a delay. */
   const withPane = (fn: (h: TerminalHandle) => void, tries = 60) => {
@@ -967,10 +972,11 @@ function Shell() {
         />
       ))}
       </div>
-      {termUsed && <TerminalPane ref={termRef} scopes={scopes} live={liveScopes} ready={!booting} onAiStates={(s, n) => {
+      {termUsed && <TerminalPane ref={termRef} scopes={scopes} live={liveScopes} ready={!booting} onAiStates={(s, n, ai) => {
             // Same states as before: skip re-rendering the app.
             setAiStates((prev) => (sameStates(prev, s) ? prev : s))
             setAiWorking(n)
+            setAiBusy(ai > 0)
           }} appSettings={appSettings} onSettings={setAppSettings} open={termOpen && !!activeTab} wanted={termOpen} onClose={() => setTermOpen(false)} />}
       </div>
 

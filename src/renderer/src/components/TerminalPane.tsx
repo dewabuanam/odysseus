@@ -111,8 +111,11 @@ interface Props {
   /** The pane is switched on (it may still be hidden, on the start page); saved for the next launch */
   wanted?: boolean
   onClose(): void
-  /** Most urgent AI state per scope key, and how many sessions are working, on every change */
-  onAiStates(states: Record<string, AiState>, working: number): void
+  /**
+   * Most urgent AI state per scope key, how many sessions are working, and how many of those
+   * are AI sessions (not shells), on every change
+   */
+  onAiStates(states: Record<string, AiState>, working: number, aiWorking: number): void
   /** Settings as the app last saw them; a change reloads the pane's copy */
   appSettings?: Settings | null
   /** The pane changed a setting (Remote Control) */
@@ -351,7 +354,8 @@ export function TerminalPane({ scopes, live, ready, open, wanted = open, onClose
       const a = aggregateAi([out[s.scope], s.ai])
       if (a) out[s.scope] = a
     }
-    onAiStatesRef.current(out, sessions.filter((s) => !s.spare && s.ai === 'working').length)
+    const working = sessions.filter((s) => !s.spare && s.ai === 'working')
+    onAiStatesRef.current(out, working.length, working.filter((s) => s.profile.command).length)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aiKey])
 

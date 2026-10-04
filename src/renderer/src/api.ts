@@ -80,6 +80,8 @@ export const api = {
   termKill: (id: number) => call<void>('termKill', id),
   aiCommands: (command: string, cwd: string) => call<AiCommand[]>('aiCommands', command, cwd),
   setAiStatus: (state: AiState | null, badge: string | null, working: number) => call<void>('setAiStatus', state, badge, working),
+  /** Keeps the display on and the PC from going idle while an AI session works */
+  keepAwake: (on: boolean) => call<void>('keepAwake', on),
   platform: () => call<string>('platform'),
   isStore: () => call<boolean>('isStore'),
   windowMinimize: () => call<void>('windowMinimize'),

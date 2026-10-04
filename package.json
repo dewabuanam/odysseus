@@ -1,7 +1,7 @@
 {
   "name": "odysseus",
   "productName": "Odysseus",
-  "version": "0.4.12",
+  "version": "0.4.13",
   "description": "A fast Git client with first-class Git hook support",
   "main": "./out/main/index.js",
   "author": "Odysseus",
