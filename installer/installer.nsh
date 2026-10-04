@@ -59,4 +59,85 @@
     nsExec::Exec '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" --install-skills'
     Pop $0
   ${EndIf}
+  !insertmacro odysseusRegisterTypes
+!macroend
+
+; An update runs the old uninstaller first; the file types stay registered through it.
+!macro customUnInstall
+  ${IfNot} ${isUpdated}
+    !insertmacro odysseusUnregisterTypes
+  ${EndIf}
+!macroend
+
+; Text file types Odysseus can open in its editor. Registering them puts Odysseus in Open With
+; and in Settings > Default apps; it never changes which app a type opens with. The user does.
+!macro odysseusTypes OP
+  !insertmacro ${OP} ".txt"
+  !insertmacro ${OP} ".log"
+  !insertmacro ${OP} ".md"
+  !insertmacro ${OP} ".markdown"
+  !insertmacro ${OP} ".json"
+  !insertmacro ${OP} ".jsonc"
+  !insertmacro ${OP} ".json5"
+  !insertmacro ${OP} ".yml"
+  !insertmacro ${OP} ".yaml"
+  !insertmacro ${OP} ".toml"
+  !insertmacro ${OP} ".ini"
+  !insertmacro ${OP} ".cfg"
+  !insertmacro ${OP} ".conf"
+  !insertmacro ${OP} ".xml"
+  !insertmacro ${OP} ".csv"
+  !insertmacro ${OP} ".tsv"
+  !insertmacro ${OP} ".env"
+  !insertmacro ${OP} ".gitignore"
+  !insertmacro ${OP} ".gitattributes"
+  !insertmacro ${OP} ".editorconfig"
+  !insertmacro ${OP} ".js"
+  !insertmacro ${OP} ".mjs"
+  !insertmacro ${OP} ".cjs"
+  !insertmacro ${OP} ".ts"
+  !insertmacro ${OP} ".tsx"
+  !insertmacro ${OP} ".jsx"
+  !insertmacro ${OP} ".css"
+  !insertmacro ${OP} ".scss"
+  !insertmacro ${OP} ".html"
+  !insertmacro ${OP} ".htm"
+  !insertmacro ${OP} ".py"
+  !insertmacro ${OP} ".sh"
+  !insertmacro ${OP} ".ps1"
+  !insertmacro ${OP} ".sql"
+!macroend
+
+!define ODYSSEUS_PROGID "Odysseus.TextFile"
+!define ODYSSEUS_CAPS "Software\Odysseus\Capabilities"
+
+!macro odysseusAddType EXT
+  WriteRegStr SHELL_CONTEXT "Software\Classes\${EXT}\OpenWithProgids" "${ODYSSEUS_PROGID}" ""
+  WriteRegStr SHELL_CONTEXT "${ODYSSEUS_CAPS}\FileAssociations" "${EXT}" "${ODYSSEUS_PROGID}"
+!macroend
+
+!macro odysseusRemoveType EXT
+  DeleteRegValue SHELL_CONTEXT "Software\Classes\${EXT}\OpenWithProgids" "${ODYSSEUS_PROGID}"
+  DeleteRegKey /ifempty SHELL_CONTEXT "Software\Classes\${EXT}\OpenWithProgids"
+!macroend
+
+!macro odysseusRegisterTypes
+  WriteRegStr SHELL_CONTEXT "Software\Classes\${ODYSSEUS_PROGID}" "" "Text file"
+  WriteRegStr SHELL_CONTEXT "Software\Classes\${ODYSSEUS_PROGID}\DefaultIcon" "" "$INSTDIR\${APP_EXECUTABLE_FILENAME},0"
+  WriteRegStr SHELL_CONTEXT "Software\Classes\${ODYSSEUS_PROGID}\shell\open\command" "" '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" "%1"'
+  WriteRegStr SHELL_CONTEXT "${ODYSSEUS_CAPS}" "ApplicationName" "Odysseus"
+  WriteRegStr SHELL_CONTEXT "${ODYSSEUS_CAPS}" "ApplicationDescription" "Git client and text editor"
+  !insertmacro odysseusTypes odysseusAddType
+  WriteRegStr SHELL_CONTEXT "Software\RegisteredApplications" "Odysseus" "${ODYSSEUS_CAPS}"
+  ; Tell Explorer the associations changed.
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
+!macroend
+
+!macro odysseusUnregisterTypes
+  !insertmacro odysseusTypes odysseusRemoveType
+  DeleteRegValue SHELL_CONTEXT "Software\RegisteredApplications" "Odysseus"
+  DeleteRegKey SHELL_CONTEXT "${ODYSSEUS_CAPS}"
+  DeleteRegKey /ifempty SHELL_CONTEXT "Software\Odysseus"
+  DeleteRegKey SHELL_CONTEXT "Software\Classes\${ODYSSEUS_PROGID}"
+  System::Call 'shell32::SHChangeNotify(i 0x08000000, i 0, p 0, p 0)'
 !macroend

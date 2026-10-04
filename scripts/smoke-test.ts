@@ -19,6 +19,7 @@ import { dropInBar } from '../src/renderer/src/workspaces'
 import { installAiSkills } from '../src/main/aiSkills'
 import { applyLineOp, buildRegex, findAll, formatJson, JsonError, lineCol, lineComment, lineStart, minifyJson, replaceAll, replacement } from '../src/shared/textOps'
 import { readEditorFile } from '../src/main/editorFile'
+import { attachText } from '../src/shared/attach'
 
 const settings: Settings = {
   extraPath: [],
@@ -699,6 +700,18 @@ async function main() {
     assert.equal(readFileSync(own, 'utf8'), 'prompt = "mine"\n', "the user's own command is kept")
     assert.equal(installAiSkills(home).length, 0, 'unchanged files are not rewritten')
     rmSync(home, { recursive: true, force: true })
+  })
+
+  await test('AI pane: dropped and pasted files typed in the form each program takes', async () => {
+    const img = 'C:\\Users\\A B\\shot.png'
+    assert.equal(attachText([img], 'claude', '', true), '"C:\\Users\\A B\\shot.png" ')
+    assert.equal(attachText([img, 'C:\\x.json'], 'codex --full-auto', '', true), '"C:\\Users\\A B\\shot.png" C:\\x.json ')
+    assert.equal(attachText([img], 'gemini', '', true), '@C:/Users/A\\ B/shot.png ')
+    assert.equal(attachText(['/tmp/a.png'], 'copilot', '', false), '@/tmp/a.png ')
+    assert.equal(attachText([img], '', 'pwsh.exe', true), "'C:\\Users\\A B\\shot.png' ")
+    assert.equal(attachText(["/home/o'k/a.png"], '', '/bin/bash', false), "'/home/o'\\''k/a.png' ")
+    assert.equal(attachText([img], '', 'cmd.exe', true), '"C:\\Users\\A B\\shot.png" ')
+    assert.equal(attachText([], 'claude', '', true), '')
   })
 
   await test('editor: find, replace, JSON formatting and line tools', async () => {

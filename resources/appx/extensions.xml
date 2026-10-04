@@ -1,0 +1,43 @@
+
+          <!-- Text file types Odysseus opens in its editor: listed under Open With and Default apps, never made the default. -->
+          <uap:Extension Category="windows.fileTypeAssociation">
+            <uap:FileTypeAssociation Name="odysseus.text">
+              <uap:DisplayName>Text file</uap:DisplayName>
+              <uap:SupportedFileTypes>
+                <uap:FileType>.txt</uap:FileType>
+                <uap:FileType>.log</uap:FileType>
+                <uap:FileType>.md</uap:FileType>
+                <uap:FileType>.markdown</uap:FileType>
+                <uap:FileType>.json</uap:FileType>
+                <uap:FileType>.jsonc</uap:FileType>
+                <uap:FileType>.json5</uap:FileType>
+                <uap:FileType>.yml</uap:FileType>
+                <uap:FileType>.yaml</uap:FileType>
+                <uap:FileType>.toml</uap:FileType>
+                <uap:FileType>.ini</uap:FileType>
+                <uap:FileType>.cfg</uap:FileType>
+                <uap:FileType>.conf</uap:FileType>
+                <uap:FileType>.xml</uap:FileType>
+                <uap:FileType>.csv</uap:FileType>
+                <uap:FileType>.tsv</uap:FileType>
+                <uap:FileType>.env</uap:FileType>
+                <uap:FileType>.gitignore</uap:FileType>
+                <uap:FileType>.gitattributes</uap:FileType>
+                <uap:FileType>.editorconfig</uap:FileType>
+                <uap:FileType>.js</uap:FileType>
+                <uap:FileType>.mjs</uap:FileType>
+                <uap:FileType>.cjs</uap:FileType>
+                <uap:FileType>.ts</uap:FileType>
+                <uap:FileType>.tsx</uap:FileType>
+                <uap:FileType>.jsx</uap:FileType>
+                <uap:FileType>.css</uap:FileType>
+                <uap:FileType>.scss</uap:FileType>
+                <uap:FileType>.html</uap:FileType>
+                <uap:FileType>.htm</uap:FileType>
+                <uap:FileType>.py</uap:FileType>
+                <uap:FileType>.sh</uap:FileType>
+                <uap:FileType>.ps1</uap:FileType>
+                <uap:FileType>.sql</uap:FileType>
+              </uap:SupportedFileTypes>
+            </uap:FileTypeAssociation>
+          </uap:Extension>

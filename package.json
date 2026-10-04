@@ -1,7 +1,7 @@
 {
   "name": "odysseus",
   "productName": "Odysseus",
-  "version": "0.4.13",
+  "version": "0.4.14",
   "description": "A fast Git client with first-class Git hook support",
   "main": "./out/main/index.js",
   "author": "Odysseus",
@@ -43,7 +43,50 @@
         "zip",
         "dmg"
       ],
-      "category": "public.app-category.developer-tools"
+      "category": "public.app-category.developer-tools",
+      "fileAssociations": [
+        {
+          "ext": [
+            "txt",
+            "log",
+            "md",
+            "markdown",
+            "json",
+            "jsonc",
+            "json5",
+            "yml",
+            "yaml",
+            "toml",
+            "ini",
+            "cfg",
+            "conf",
+            "xml",
+            "csv",
+            "tsv",
+            "env",
+            "gitignore",
+            "gitattributes",
+            "editorconfig",
+            "js",
+            "mjs",
+            "cjs",
+            "ts",
+            "tsx",
+            "jsx",
+            "css",
+            "scss",
+            "html",
+            "htm",
+            "py",
+            "sh",
+            "ps1",
+            "sql"
+          ],
+          "name": "Text file",
+          "role": "Editor",
+          "rank": "Alternate"
+        }
+      ]
     },
     "linux": {
       "target": [
@@ -78,7 +121,8 @@
       "minVersion": "10.0.19041.0",
       "maxVersionTested": "10.0.26100.0",
       "customManifestPath": "appx/appxmanifest.xml",
-      "artifactName": "Odysseus-${version}.msix"
+      "artifactName": "Odysseus-${version}.msix",
+      "customExtensionsPath": "resources/appx/extensions.xml"
     },
     "asarUnpack": [
       "node_modules/node-pty/**"

@@ -10,7 +10,7 @@ import type {
   Tag,
   WorkingStatus
 } from '@shared/types'
-import type { RepoApi } from './api'
+import { api as appApi, type RepoApi } from './api'
 import type { Cmd, Step, Suggestion } from './palette'
 import type { AskOptions, AskResult } from './ui'
 
@@ -577,6 +577,14 @@ export function buildCommands(d: CommandDeps): Cmd[] {
     { id: 'view.refresh', title: 'View: Refresh', when: has, run: () => d.refresh() },
     { id: 'view.find', title: 'Find: Search Commits', detail: 'message, author, sha', when: has, run: () => d.find() },
     { id: 'view.history', title: 'View: Command History', detail: 'every command run in this repository', when: has, run: () => d.showHistory() },
+    {
+      id: 'app.defaultApp',
+      title: 'Preferences: Use Odysseus to Open Text Files',
+      detail: 'txt, json, md, yaml and more open in the Odysseus editor',
+      run: async () => {
+        if (!(await appApi.openDefaultApps())) d.toast('Right-click a file, choose Open With, pick Odysseus and set it as the default')
+      }
+    },
     { id: 'app.settings', title: 'Preferences: Settings', detail: 'hook environment, PATH, timeout, diagnostics', run: () => d.openSettings() }
   ]
 }

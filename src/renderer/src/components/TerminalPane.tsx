@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
 import { aggregateAi, programOf, remoteControlFor, type AiPaneState, type AiState, type Settings, type TerminalProfile } from '@shared/types'
+import { attachText } from '@shared/attach'
 import { AI_LABEL, detectAiState, detectShellState, visibleText } from '../aiState'
 import { api } from '../api'
 import { useUi } from '../ui'
@@ -458,7 +459,7 @@ export function TerminalPane({ scopes, live, ready, open, wanted = open, onClose
         )}
         <div className="term-body">
           {sessions.map((s) => (
-            <TermView key={s.key} cwd={s.cwd} profile={s.profile} sessionId={s.sid} visible={open && s.scope === scope?.key && s.key === active} onExit={() => onExit(s.key)} shell={!s.profile.command} onAi={(a) => onAi(s.key, a)} pull={() => outbox.current.get(s.key)?.shift()} />
+            <TermView key={s.key} cwd={s.cwd} profile={s.profile} sessionId={s.sid} visible={open && s.scope === scope?.key && s.key === active} onExit={() => onExit(s.key)} shell={!s.profile.command} onAi={(a) => onAi(s.key, a)} shellExe={settings?.terminalShell || shellName} pull={() => outbox.current.get(s.key)?.shift()} />
           ))}
           {mine.length === 0 && (
             <div className="term-empty">
@@ -492,9 +493,13 @@ interface TermViewProps {
   onAi?(state: AiState): void
   /** Next text to type in once the program is ready for input */
   pull?(): string | undefined
+  /** The shell's executable, to quote dropped paths for it */
+  shellExe?: string
 }
 
-function TermView({ cwd, profile, sessionId, visible, shell, onExit, onAi, pull }: TermViewProps) {
+const isWin = navigator.userAgent.includes('Windows')
+
+function TermView({ cwd, profile, sessionId, visible, shell, onExit, onAi, pull, shellExe }: TermViewProps) {
   const host = useRef<HTMLDivElement>(null)
   const ref = useRef<{ term: Terminal; fit: FitAddon; id: number | null } | null>(null)
   const onExitRef = useRef(onExit)
@@ -503,6 +508,9 @@ function TermView({ cwd, profile, sessionId, visible, shell, onExit, onAi, pull 
   onAiRef.current = onAi
   const pullRef = useRef(pull)
   pullRef.current = pull
+  const shellRef = useRef(shellExe)
+  shellRef.current = shellExe
+  const [dropping, setDropping] = useState(false)
 
   useEffect(() => {
     const term = new Terminal({
@@ -600,6 +608,55 @@ function TermView({ cwd, profile, sessionId, visible, shell, onExit, onAi, pull 
         lastOutputAt = Date.now()
       }
     }, 600)
+    // Files dropped here, and images pasted here, go to the program as paths it can attach.
+    const attach = (paths: string[]) => {
+      const text = attachText(paths.filter(Boolean), profile.command, shellRef.current ?? '', isWin)
+      if (text) term.paste(text)
+      term.focus()
+    }
+    const el = host.current!
+    const hasFiles = (e: DragEvent) => !!e.dataTransfer?.types.includes('Files')
+    const over = (e: DragEvent) => {
+      if (!hasFiles(e)) return
+      e.preventDefault()
+      e.stopPropagation()
+      e.dataTransfer!.dropEffect = 'copy'
+      setDropping(true)
+    }
+    const leave = (e: DragEvent) => {
+      if (!el.contains(e.relatedTarget as Node | null)) setDropping(false)
+    }
+    const drop = (e: DragEvent) => {
+      setDropping(false)
+      const files = [...(e.dataTransfer?.files ?? [])]
+      if (!files.length) return
+      // Handled here, so the window doesn't also open the files in the editor.
+      e.preventDefault()
+      e.stopPropagation()
+      attach(files.map((f) => window.ody.pathForFile(f)))
+    }
+    const paste = (e: ClipboardEvent) => {
+      const items = [...(e.clipboardData?.items ?? [])]
+      if (items.some((i) => i.type === 'text/plain')) return
+      const files = items.filter((i) => i.kind === 'file').map((i) => i.getAsFile()).filter((f): f is File => !!f)
+      if (!files.length) return
+      e.preventDefault()
+      e.stopPropagation()
+      // A copied file has a path on disk; a screenshot or copied image is saved to one first.
+      Promise.all(
+        files.map(async (f) => {
+          const p = window.ody.pathForFile(f)
+          if (p) return p
+          const ext = f.type.replace(/^image\//, '').replace('jpeg', 'jpg')
+          return api.savePastedImage(new Uint8Array(await f.arrayBuffer()), ext)
+        })
+      ).then(attach, (err) => term.write(`\r\n\x1b[31m${(err as Error).message}\x1b[0m\r\n`))
+    }
+    el.addEventListener('dragover', over)
+    el.addEventListener('dragleave', leave)
+    el.addEventListener('drop', drop)
+    el.addEventListener('paste', paste, true)
+
     const mo = new MutationObserver(() => (term.options.theme = xtermTheme()))
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 
@@ -608,6 +665,10 @@ function TermView({ cwd, profile, sessionId, visible, shell, onExit, onAi, pull 
       clearInterval(watch)
       ro.disconnect()
       mo.disconnect()
+      el.removeEventListener('dragover', over)
+      el.removeEventListener('dragleave', leave)
+      el.removeEventListener('drop', drop)
+      el.removeEventListener('paste', paste, true)
       off()
       input.dispose()
       if (state.id !== null) api.termKill(state.id)
@@ -631,5 +692,5 @@ function TermView({ cwd, profile, sessionId, visible, shell, onExit, onAi, pull 
     })
   }, [visible])
 
-  return <div ref={host} className="term-view" style={visible ? undefined : { display: 'none' }} />
+  return <div ref={host} className={`term-view ${dropping ? 'dropping' : ''}`} style={visible ? undefined : { display: 'none' }} />
 }

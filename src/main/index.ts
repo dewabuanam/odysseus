@@ -1,6 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, powerSaveBlocker, shell } from 'electron'
-import { existsSync, mkdirSync, readdirSync, watch, type FSWatcher } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync, watch, writeFileSync, type FSWatcher } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { buildEnv, diagnostics, envPath, initEnv } from './env'
 import { GitRepo, type DiffSource } from './git/repo'
 import { HookService } from './git/hooks'
@@ -363,6 +363,8 @@ const appApi: Record<string, Handler> = {
   history: (root?: string, limit?: number) => getHistory(root, limit),
   openExternal: (p: string) => shell.openPath(p),
   /** Opens a web link in the browser; only https links are allowed. */
+  /** Opens the system page for picking Odysseus as a file type's default app; false where there is none. */
+  openDefaultApps: async () => process.platform === 'win32' && (await shell.openExternal('ms-settings:defaultapps?registeredAppUser=Odysseus').then(() => true, () => false)),
   openUrl: (url: string) => (/^https:\/\//.test(url) ? shell.openExternal(url) : undefined),
   appInfo: () => ({
     version: app.getVersion(),
@@ -379,6 +381,7 @@ const appApi: Record<string, Handler> = {
   termWrite: (id: number, data: string) => terminals.write(id, data),
   termResize: (id: number, cols: number, rows: number) => terminals.resize(id, cols, rows),
   termKill: (id: number) => terminals.kill(id),
+  savePastedImage: (data: Uint8Array, ext: string) => savePastedImage(data, ext),
   aiCommands: (command: string, cwd: string) => aiCommands(command, cwd),
   setAiStatus: (state: AiState | null, badge?: string | null, working?: number) => setAiStatus(state, badge, working),
   keepAwake: (on: boolean) => keepAwake(on),
@@ -489,6 +492,28 @@ const editorApi: Record<string, EditorHandler> = {
   editorClose: (e) => closeEditor(e)
 }
 
+/**
+ * Saves an image pasted into a terminal session to a temporary file, so the AI there can attach
+ * it by path. Pastes older than a week are cleared out on the way.
+ */
+function savePastedImage(data: Uint8Array, ext: string): string {
+  if (!/^(png|jpe?g|gif|webp|bmp)$/.test(ext)) throw new Error(`Not an image type: ${ext}`)
+  const dir = join(app.getPath('temp'), 'odysseus-pastes')
+  mkdirSync(dir, { recursive: true })
+  const week = Date.now() - 7 * 24 * 3600 * 1000
+  for (const f of readdirSync(dir)) {
+    try {
+      if (statSync(join(dir, f)).mtimeMs < week) rmSync(join(dir, f), { force: true })
+    } catch {
+      /* in use or gone */
+    }
+  }
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace('T', '-').slice(0, 15)
+  const file = join(dir, `paste-${stamp}-${Math.random().toString(36).slice(2, 6)}.${ext}`)
+  writeFileSync(file, data)
+  return file
+}
+
 ipcMain.handle('ody:invoke', async (e, method: string, args: unknown[]) => {
   const ed = editorApi[method]
   if (ed) return ed(e, ...args)
@@ -531,6 +556,8 @@ function createWindow(): void {
   win.on('focus', () => send('focus', null))
   win.on('maximize', () => send('maximized', true))
   win.on('unmaximize', () => send('maximized', false))
+  // Editor windows can outlive it; events then go nowhere instead of to a destroyed window.
+  win.on('closed', () => (win = null))
   if (process.env.ELECTRON_RENDERER_URL) win.loadURL(process.env.ELECTRON_RENDERER_URL)
   else win.loadFile(join(__dirname, '../renderer/index.html'))
 }
@@ -547,12 +574,54 @@ if (process.argv.includes('--install-skills')) {
   app.exit(0)
 }
 
+/**
+ * Files on a command line, as Windows and Linux start a file's default app: each argument that
+ * isn't a switch and names a file. The first argument is the exe (and the app folder in dev).
+ */
+function fileArgs(argv: string[], cwd = process.cwd()): string[] {
+  return argv
+    .slice(app.isPackaged ? 1 : 2)
+    .filter((a) => !a.startsWith('-'))
+    .map((a) => resolve(cwd, a))
+    .filter((p) => pathKind(p) === 'file')
+}
+
+/** Files to open, from macOS before the app is ready. */
+const openLater: string[] = []
+let ready = false
+const openFile = (p: string) => openEditor(p, editorOptions(__dirname, iconPath, getSettings().theme === 'dark'))
+
+/** Brings the main window forward, opening it when only editor windows are open. */
+function showMain(): void {
+  if (!win || win.isDestroyed()) return createWindow()
+  if (win.isMinimized()) win.restore()
+  win.focus()
+}
+
+// One Odysseus at a time: starting it again (or opening a file with it) goes to the one running.
+if (!app.requestSingleInstanceLock()) app.exit(0)
+app.on('second-instance', (_e, argv, cwd) => {
+  if (!ready) return
+  const files = fileArgs(argv, cwd)
+  if (files.length) files.forEach(openFile)
+  else showMain()
+})
+app.on('open-file', (e, p) => {
+  e.preventDefault()
+  if (ready) openFile(p)
+  else openLater.push(p)
+})
+
 app.whenReady().then(async () => {
   installAiSkills()
   loadStore()
   await initEnv(getSettings())
   if (process.platform === 'darwin' && existsSync(iconPath)) app.dock?.setIcon(iconPath)
-  createWindow()
+  ready = true
+  // Opened as a file's default app: just the file, in an editor window.
+  const files = [...fileArgs(process.argv), ...openLater]
+  if (files.length) files.forEach(openFile)
+  else createWindow()
   app.on('activate', () => BrowserWindow.getAllWindows().length === 0 && createWindow())
 })
 

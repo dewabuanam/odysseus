@@ -70,6 +70,7 @@ export const api = {
   cloneRepo: (url: string) => call<RepoSummary | null>('cloneRepo', url),
   history: (root?: string, limit?: number) => call<HistoryEntry[]>('history', root, limit),
   openExternal: (p: string) => call<string>('openExternal', p),
+  openDefaultApps: () => call<boolean>('openDefaultApps'),
   openUrl: (url: string) => call<void>('openUrl', url),
   appInfo: () => call<{ version: string; electron: string; chrome: string; node: string; os: string; dataDir: string }>('appInfo'),
   showInFolder: (p: string) => call<void>('showInFolder', p),
@@ -78,6 +79,8 @@ export const api = {
   termWrite: (id: number, data: string) => call<void>('termWrite', id, data),
   termResize: (id: number, cols: number, rows: number) => call<void>('termResize', id, cols, rows),
   termKill: (id: number) => call<void>('termKill', id),
+  /** Saves an image pasted into a terminal to a temporary file and returns its path */
+  savePastedImage: (data: Uint8Array, ext: string) => call<string>('savePastedImage', data, ext),
   aiCommands: (command: string, cwd: string) => call<AiCommand[]>('aiCommands', command, cwd),
   setAiStatus: (state: AiState | null, badge: string | null, working: number) => call<void>('setAiStatus', state, badge, working),
   /** Keeps the display on and the PC from going idle while an AI session works */
