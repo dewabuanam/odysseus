@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, shell } from 'electron'
-import { existsSync, readdirSync, watch, type FSWatcher } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, watch, type FSWatcher } from 'node:fs'
 import { join } from 'node:path'
 import { buildEnv, diagnostics, envPath, initEnv } from './env'
 import { GitRepo, type DiffSource } from './git/repo'
@@ -300,8 +300,8 @@ const appApi: Record<string, Handler> = {
   getAiPane: () => getAiPane(),
   setAlias: (path: string, alias: string) => setAlias(path, alias),
   setAiPane: (pane: AiPaneState) => setAiPane(pane),
-  pickFolder: async (title?: string) => {
-    const r = await dialog.showOpenDialog(win!, { properties: ['openDirectory'], title })
+  pickFolder: async (title?: string, create?: boolean) => {
+    const r = await dialog.showOpenDialog(win!, { properties: create ? ['openDirectory', 'createDirectory'] : ['openDirectory'], title })
     return r.canceled ? null : r.filePaths[0]
   },
   /** Git repositories in a folder: the folder itself, or the ones directly inside it. */
@@ -322,10 +322,16 @@ const appApi: Record<string, Handler> = {
   openRepo: (dir: string) => openRepo(dir),
   closeRepo: (root: string) => unregister(root),
   initRepo: async () => {
-    const r = await dialog.showOpenDialog(win!, { properties: ['openDirectory', 'createDirectory'] })
+    const r = await dialog.showOpenDialog(win!, { properties: ['openDirectory', 'createDirectory'], title: 'Folder for the new repository' })
     if (r.canceled) return null
     await runner.data(r.filePaths[0], ['init'])
     return openRepo(r.filePaths[0])
+  },
+  /** Creates the folder when missing and runs `git init` in it. */
+  initRepoAt: async (dir: string) => {
+    mkdirSync(dir, { recursive: true })
+    await runner.data(dir, ['init'])
+    return openRepo(dir)
   },
   cloneRepo: async (url: string) => {
     const r = await dialog.showOpenDialog(win!, { properties: ['openDirectory', 'createDirectory'], title: 'Clone into…' })

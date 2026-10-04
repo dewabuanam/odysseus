@@ -93,7 +93,7 @@ Press **Ctrl+P**. Every action lives there, with fuzzy matching (`chk` finds *Ch
 
 ### Tabs and a command queue
 
-- Open any number of repositories in **tabs** on their own row. Tabs that don't fit go into the **▾** menu next to **+**; picking one from there moves it into the visible row (the last visible tab moves into the menu). Tab order is restored on launch. Give a repository its own name with **Rename…** on the tab's right-click menu (or **Tab: Rename Repository…**); the name shows on its tab, in the AI pane and in the recent list, and an empty name goes back to the folder name.
+- Open any number of repositories in **tabs** on their own row. Tabs that don't fit go into the **▾** menu next to **+**; picking one from there moves it into the visible row (the last visible tab moves into the menu). **+** creates, opens or clones a repository, or starts a new workspace; the same actions are **Repository: Create New**, **Repository: Open**, **Repository: Clone** and **Workspace: Create New** in the palette, with or without a tab open. Tab order is restored on launch. Give a repository its own name with **Rename…** on the tab's right-click menu (or **Tab: Rename Repository…**); the name shows on its tab, in the AI pane and in the recent list, and an empty name goes back to the folder name.
 - **Every git command is queued per repository** and runs strictly in order. Pull, checkout another branch, pull, checkout, pull: fire them as fast as you like and they run in exactly that sequence, never two at once. Queued commands show in the console with a button to drop them.
 - **Command history** of every command, its output, exit code and failing hook, kept across restarts (Ctrl+H).
 
@@ -101,6 +101,7 @@ Press **Ctrl+P**. Every action lives there, with fuzzy matching (`chk` finds *Ch
 
 Group tabs into **workspaces**, like browser tab groups. Each workspace is a colored chip in the tab row. Workspaces stay expanded with all their tabs until you click a chip to collapse it; the workspace holding the current tab is always expanded. Click a collapsed chip to expand it and switch to that workspace, at the tab you last used there. Collapsed and expanded workspaces stay that way after a restart.
 
+- **Workspace: Create New** makes a named group for a folder (pick it or make a new one). Its repositories open as the group's tabs; when the folder has none yet, Odysseus creates the first one inside it.
 - **Workspace: New from Folder** opens every repository in a folder (or the folder itself) as one group. Right-click a tab to add it to a workspace or take it out.
 - Right-click a chip to rename it, change its color or folder, open the AI there, ungroup, or close the workspace with its tabs.
 - Each workspace has a **folder** (by default the folder its repositories live in). The AI pane can start there, so one AI session can see every repository in the workspace.
@@ -195,6 +196,7 @@ npm run dev             # run with hot reload
 npm test                # end-to-end tests of the git engine against real repositories
 npm run dist:portable   # Windows portable .exe into dist/
 npm run dist:win        # signed Windows release: setup.exe, portable.exe, zip, checksums
+npm run dist:store      # Microsoft Store package (.msix) to upload to Partner Center
 npm run dist            # every target for the current OS
 ```
 

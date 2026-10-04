@@ -15,7 +15,8 @@ interface Props {
   workspaces: Workspace[]
   onSelect(path: string): void
   onClose(path: string): void
-  onNew(): void
+  /** The + button: a menu at the given point (new or open repository, new workspace) */
+  onNew(e: { clientX: number; clientY: number }): void
   /** A tab or a group's chip was dragged and dropped beside another tab or chip */
   onDrop(drag: DragItem, target: DropTarget): void
   /** Workspace ids the user collapsed; the others stay expanded */
@@ -204,7 +205,14 @@ export function TabBar({ tabs, active, workspaces, collapsed, onSelect, onClose,
           ▾ <span className="tab-more-count">{hidden.length}</span>
         </button>
       )}
-      <button className="tab-new" onClick={onNew} title="Open repository in a new tab">
+      <button
+        className="tab-new"
+        title="New or open a repository, or a new workspace"
+        onClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect()
+          onNew({ clientX: r.left, clientY: r.bottom + 2 })
+        }}
+      >
         +
       </button>
       <div className="tabbar-fill" />

@@ -1,4 +1,4 @@
-# Builds the Microsoft Store package (dist/Odysseus-<version>.appx). Run through
+# Builds the Microsoft Store package (dist/Odysseus-<version>.msix). Run through
 # `npm run dist:store` (it builds the app first).
 #
 #   (no switch)  The package to upload to Partner Center. Unsigned: the Store signs it. Its
@@ -7,7 +7,7 @@
 #   -Test        A package to install on this computer before submitting: signed with the
 #                Odysseus signing key from $HOME\.odysseus-signing, its publisher set to that
 #                certificate's subject. Install certs/odysseus-codesign.cer first
-#                (certs/install-certificate.ps1), then double-click the .appx.
+#                (certs/install-certificate.ps1), then double-click the .msix.
 
 param([switch]$Test)
 
@@ -18,7 +18,7 @@ $appx = $pkg.build.appx
 
 $builderArgs = @('--win', 'appx')
 # electron-builder signs nothing here: the Store signs uploads itself, and its bundled signtool
-# can't sign an .appx. A test package is signed afterwards with the Windows SDK's signtool.
+# can't sign the package. A test package is signed afterwards with the Windows SDK's signtool.
 $env:CSC_IDENTITY_AUTO_DISCOVERY = 'false'
 Remove-Item Env:CSC_LINK -ErrorAction SilentlyContinue
 if ($Test) {
@@ -48,7 +48,7 @@ try {
   Pop-Location
 }
 
-$package = Join-Path $root "dist\Odysseus-$($pkg.version).appx"
+$package = Join-Path $root "dist\Odysseus-$($pkg.version).msix"
 if ($Test) {
   $password = (Get-Content (Join-Path $secretDir 'password.txt') -Raw).Trim()
   & $signtool.FullName sign /q /fd SHA256 /f $pfx /p $password $package

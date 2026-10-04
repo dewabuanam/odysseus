@@ -317,6 +317,71 @@ function Shell() {
     ui.toast(`Workspace ${w.name}: ${opened.length} repositor${opened.length === 1 ? 'y' : 'ies'}`)
   }
 
+  /** Picks (or makes) a folder and runs `git init` there. */
+  const newRepository = async () => {
+    try {
+      const r = await api.initRepo()
+      if (r) openRepo(r.path)
+    } catch (e) {
+      ui.toast((e as Error).message, true)
+    }
+  }
+
+  const cloneRepository = async () => {
+    const a = await ui.ask({ title: 'Clone repository', input: { label: 'Repository URL', placeholder: 'https://github.com/user/repo.git' }, confirmLabel: 'Choose folder & clone' })
+    if (!a?.value.trim()) return
+    try {
+      const r = await api.cloneRepo(a.value.trim())
+      if (r) openRepo(r.path)
+    } catch (e) {
+      ui.toast((e as Error).message, true)
+    }
+  }
+
+  /**
+   * A named group for a folder (made in the picker if it's new). Its repositories open as the
+   * group's tabs; an empty folder gets a first repository, since a group lives on its tabs.
+   */
+  const newWorkspace = async () => {
+    const folder = await api.pickFolder('Folder for the new workspace', true)
+    if (!folder) return
+    const named = await ui.ask({ title: 'New workspace', input: { label: 'Name', value: folder.split(/[\\/]/).filter(Boolean).pop() ?? 'Workspace' }, confirmLabel: 'Create' })
+    const name = named?.value.trim()
+    if (!name) return
+    let found = await api.scanRepos(folder)
+    if (!found.length) {
+      const first = await ui.ask({
+        title: `New workspace ${name}`,
+        message: `${folder} has no repositories yet. Create the first one inside it:`,
+        input: { label: 'Repository name', placeholder: 'my-project' },
+        confirmLabel: 'Create repository'
+      })
+      const repo = first?.value.trim()
+      if (!repo) return
+      try {
+        const sep = folder.includes('\\') ? '\\' : '/'
+        found = [(await api.initRepoAt(`${folder.replace(/[\\/]+$/, '')}${sep}${repo}`)).path]
+      } catch (e) {
+        return void ui.toast((e as Error).message, true)
+      }
+    }
+    const opened = await openRepos(found)
+    if (!opened.length) return
+    createWorkspace(name, folder, opened.map((r) => r.path))
+    ui.toast(`Workspace ${name}: ${opened.length} repositor${opened.length === 1 ? 'y' : 'ies'}`)
+  }
+
+  /** The tab row's + button. */
+  const newMenu = (e: { clientX: number; clientY: number }): void =>
+    ui.menu(e, [
+      { label: 'New repository…', action: () => { newRepository() } },
+      { label: 'Open repository…', action: () => { api.pickRepo().then((d) => { if (d) openRepo(d) }) } },
+      { label: 'Clone repository…', action: () => { cloneRepository() } },
+      { separator: true, label: '' },
+      { label: 'New workspace…', action: () => { newWorkspace() } },
+      { label: 'Open workspace folder…', action: () => { newWorkspaceFromFolder() } }
+    ])
+
   const nameStep = (title: string, value: string, submit: (v: string) => void): Step => ({
     kind: 'input',
     placeholder: 'Workspace name',
@@ -579,6 +644,8 @@ function Shell() {
     { id: 'app.goto', title: 'Go to: Open Tab, Workspace, Shell or AI…', detail: 'anything already open', run: () => gotoStep() },
     ...stateRef.current.tabs.map((t, i) => ({ id: `tab.goto.${t.path}`, title: `Tab: Switch to ${t.name}`, detail: tabDetail(t), when: t.path !== stateRef.current.active, run: () => switchTab({ index: i }) })),
     { id: 'repo.open', title: 'Repository: Open…', run: () => { api.pickRepo().then((d) => { if (d) openRepo(d) }) } },
+    { id: 'repo.init', title: 'Repository: Create New…', detail: 'git init in a new or empty folder', run: () => { newRepository() } },
+    { id: 'repo.clone', title: 'Repository: Clone…', run: () => { cloneRepository() } },
 
     // AI and terminal pane
     {
@@ -631,6 +698,7 @@ function Shell() {
     },
 
     // workspaces
+    { id: 'ws.create', title: 'Workspace: Create New…', detail: 'a named group for a folder; starts its first repository if it has none', run: () => { newWorkspace() } },
     { id: 'ws.new', title: 'Workspace: New from Folder…', detail: 'opens every repository in a folder as one group', run: () => { newWorkspaceFromFolder() } },
     { id: 'ws.add', title: 'Workspace: Add Tab to Workspace…', when: !!stateRef.current.active, run: () => addToWorkspaceStep(stateRef.current.active!) },
     { id: 'ws.remove', title: `Workspace: Remove Tab from ${activeWs?.name ?? ''}`, when: !!activeWs, run: () => saveWorkspaces(withoutRepos(stateRef.current.workspaces, [stateRef.current.active!])) },
@@ -837,7 +905,7 @@ function Shell() {
           groupAi={groupAi}
           onGroupMenu={groupMenu}
           onTabMenu={tabMenu}
-          onNew={() => api.pickRepo().then((d) => { if (d) openRepo(d) })}
+          onNew={newMenu}
           onDrop={dropTab}
         />
       )}

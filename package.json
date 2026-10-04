@@ -1,7 +1,7 @@
 {
   "name": "odysseus",
   "productName": "Odysseus",
-  "version": "0.4.10",
+  "version": "0.4.11",
   "description": "A fast Git client with first-class Git hook support",
   "main": "./out/main/index.js",
   "author": "Odysseus",
@@ -78,7 +78,7 @@
       "minVersion": "10.0.19041.0",
       "maxVersionTested": "10.0.26100.0",
       "customManifestPath": "appx/appxmanifest.xml",
-      "artifactName": "Odysseus-${version}.appx"
+      "artifactName": "Odysseus-${version}.msix"
     },
     "asarUnpack": [
       "node_modules/node-pty/**"
