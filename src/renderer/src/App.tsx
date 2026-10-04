@@ -26,7 +26,7 @@ import { TabBar } from './components/TabBar'
 import { TitleBar } from './components/TitleBar'
 import { Welcome } from './components/Welcome'
 import { defaultProfile, hasRemote, TerminalPane, type OpenSession, type TerminalHandle, type TermScope } from './components/TerminalPane'
-import { addRepos, commonFolder, dropInBar, newId, nextColor, prune, withoutRepos, wsOf, LANE_COUNT, type DragItem, type DropTarget } from './workspaces'
+import { addRepos, commonFolder, newId, nextColor, prune, withoutRepos, wsOf, LANE_COUNT } from './workspaces'
 
 const AI_BADGE: Record<AiState, string> = { waiting: '#d93a32', working: '#e0a400', idle: '#2f9a4f' }
 
@@ -184,15 +184,11 @@ function Shell() {
     persist(cur, cur[n].path)
   }, [])
 
-  /** A tab or a group dragged in the tab row: reorder, and move a dragged tab into or out of a group. */
-  const dropTab = useCallback((drag: DragItem, target: DropTarget) => {
-    const { tabs: cur, active: act, workspaces: ws } = stateRef.current
-    const r = dropInBar(cur, ws, drag, target)
-    if (!r) return
-    setTabs(r.tabs)
-    persist(r.tabs, act)
-    if (drag.kind !== 'tab' || r.group === undefined || wsOf(ws, drag.path)?.id === (r.group ?? undefined)) return
-    saveWorkspaces(r.group ? addRepos(ws, r.group, [drag.path]) : withoutRepos(ws, [drag.path]))
+  /** A tab or a group dragged to a new place in the tab row: the new order, and its groups when a tab joined or left one. */
+  const reorderTabs = useCallback((next: RepoSummary[], ws: Workspace[]) => {
+    setTabs(next)
+    persist(next, stateRef.current.active)
+    if (ws !== stateRef.current.workspaces) saveWorkspaces(ws)
   }, [saveWorkspaces])
 
   const selectTab = useCallback((path: string) => {
@@ -306,8 +302,8 @@ function Shell() {
   const updateWorkspace = (id: string, patch: Partial<Workspace>) =>
     saveWorkspaces(stateRef.current.workspaces.map((w) => (w.id === id ? { ...w, ...patch } : w)))
 
-  const newWorkspaceFromFolder = async () => {
-    const folder = await api.pickFolder('Workspace folder: its repositories open as one group')
+  const newWorkspaceFromFolder = async (given?: string) => {
+    const folder = given ?? (await api.pickFolder('Workspace folder: its repositories open as one group'))
     if (!folder) return
     const found = await api.scanRepos(folder)
     if (!found.length) return void ui.toast('No git repositories in that folder or directly inside it', true)
@@ -316,6 +312,50 @@ function Shell() {
     const w = createWorkspace(folder.split(/[\\/]/).filter(Boolean).pop() ?? 'Workspace', folder, opened.map((r) => r.path))
     ui.toast(`Workspace ${w.name}: ${opened.length} repositor${opened.length === 1 ? 'y' : 'ies'}`)
   }
+
+  /**
+   * A folder dropped on the window: a repository opens as a tab, a folder of repositories as
+   * a workspace, and a folder inside a repository opens that repository.
+   */
+  const openDroppedFolder = async (folder: string) => {
+    const found = await api.scanRepos(folder)
+    if (found.length === 1 && norm(found[0]) === norm(folder)) return openRepo(folder)
+    if (found.length) return newWorkspaceFromFolder(folder)
+    try {
+      await api.openRepo(folder)
+    } catch {
+      return void ui.toast(`${folder} is not a git repository and has none directly inside it`, true)
+    }
+    return openRepo(folder)
+  }
+  const openDroppedRef = useRef(openDroppedFolder)
+  openDroppedRef.current = openDroppedFolder
+
+  // Files dropped on the window open in editor windows; folders open as repositories or workspaces.
+  useEffect(() => {
+    const over = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes('Files')) return
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'copy'
+    }
+    const drop = async (e: DragEvent) => {
+      const files = [...(e.dataTransfer?.files ?? [])]
+      if (!files.length) return
+      e.preventDefault()
+      for (const f of files) {
+        const p = window.ody.pathForFile(f)
+        const kind = p ? await api.pathKind(p) : null
+        if (kind === 'file') api.openEditor(p)
+        else if (kind === 'dir') await openDroppedRef.current(p)
+      }
+    }
+    window.addEventListener('dragover', over)
+    window.addEventListener('drop', drop)
+    return () => {
+      window.removeEventListener('dragover', over)
+      window.removeEventListener('drop', drop)
+    }
+  }, [])
 
   /** Picks (or makes) a folder and runs `git init` there. */
   const newRepository = async () => {
@@ -906,7 +946,7 @@ function Shell() {
           onGroupMenu={groupMenu}
           onTabMenu={tabMenu}
           onNew={newMenu}
-          onDrop={dropTab}
+          onReorder={reorderTabs}
         />
       )}
       <div className="workarea">

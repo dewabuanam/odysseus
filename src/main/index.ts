@@ -8,6 +8,7 @@ import { GitRunner } from './git/runner'
 import { TerminalService } from './terminal'
 import { aiCommands } from './aiCommands'
 import { installAiSkills } from './aiSkills'
+import { closeEditor, editorOptions, openEditor, pathKind, pickFile, readEditorFile, setEditorDirty, setEditorPath, writeEditorFile } from './editor'
 import {
   addHistory,
   addRecent,
@@ -454,7 +455,25 @@ const repoApi: Record<string, RepoHandler> = {
   runHook: ({ hooks }, n: HookName, msg?: string) => hooks.run(n, msg)
 }
 
-ipcMain.handle('ody:invoke', async (_e, method: string, args: unknown[]) => {
+// ------------------------------------------------------------------ IPC: file editor windows
+
+type EditorHandler = (e: Electron.IpcMainInvokeEvent, ...args: any[]) => unknown
+
+const editorApi: Record<string, EditorHandler> = {
+  /** Opens a file as it is on disk now in its own editor window */
+  openEditor: (_e, path: string) => openEditor(path, editorOptions(__dirname, iconPath, getSettings().theme === 'dark')),
+  pickFile: (e, defaultPath?: string) => pickFile(e, defaultPath),
+  pathKind: (_e, p: string) => pathKind(p),
+  readFile: (_e, path: string) => readEditorFile(path),
+  writeFile: (e, path: string, text: string, eol: 'CRLF' | 'LF', bom: boolean) => writeEditorFile(e, path, text, eol, bom),
+  editorDirty: (e, dirty: boolean) => setEditorDirty(e, dirty),
+  editorPath: (e, path: string) => setEditorPath(e, path),
+  editorClose: (e) => closeEditor(e)
+}
+
+ipcMain.handle('ody:invoke', async (e, method: string, args: unknown[]) => {
+  const ed = editorApi[method]
+  if (ed) return ed(e, ...args)
   const fn = appApi[method]
   if (!fn) throw new Error(`Unknown method ${method}`)
   return fn(...args)

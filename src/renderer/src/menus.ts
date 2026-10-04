@@ -2,6 +2,7 @@ import type { Branch, Commit } from '@shared/types'
 import { input, list, options, type CommandDeps, newBranchFlowFor, tagFlowFor } from './commands'
 import type { Step } from './palette'
 import type { MenuItem } from './ui'
+import { api } from './api'
 
 /** Extra capabilities context menus need on top of the palette's command deps. */
 export interface MenuDeps extends CommandDeps {
@@ -16,6 +17,25 @@ export interface MenuDeps extends CommandDeps {
 const copy = (d: MenuDeps, text: string) => {
   navigator.clipboard.writeText(text)
   d.toast(`Copied ${text.length > 40 ? text.slice(0, 40) + '…' : text}`)
+}
+
+/** Full path of a file in a repository (git paths use forward slashes). */
+export const repoFile = (root: string, path: string) => `${root.replace(/[\\/]+$/, '')}/${path}`
+
+/**
+ * Menu for a file in a change list. Opening edits the file as it is on disk now, whatever
+ * version the list shows.
+ */
+export function fileMenu(root: string, path: string, gone: boolean, toast: (msg: string) => void): MenuItem[] {
+  const full = repoFile(root, path)
+  return [
+    { label: 'Edit file', disabled: gone, action: () => api.openEditor(full) },
+    { label: 'Open with default app', disabled: gone, action: () => { api.openExternal(full) } },
+    { label: 'Show in folder', disabled: gone, action: () => api.showInFolder(full) },
+    { separator: true, label: '' },
+    { label: 'Copy path', action: () => { navigator.clipboard.writeText(path); toast(`Copied ${path}`) } },
+    { label: 'Copy full path', action: () => { navigator.clipboard.writeText(full); toast(`Copied ${full}`) } }
+  ]
 }
 
 // ------------------------------------------------------------------ steps shared by menus

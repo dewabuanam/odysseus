@@ -9,6 +9,7 @@ import { ConflictView } from './ConflictView'
 import { DiffView } from './DiffView'
 import { CALM_SCENES, OdysseyArt } from './OdysseyArt'
 import type { CommitAction } from '../commands'
+import { fileMenu, repoFile } from '../menus'
 
 type Area = 'unstaged' | 'staged' | 'conflicted'
 
@@ -230,7 +231,14 @@ export function WorkingPanel() {
       const open = expanded.has(k)
       return (
         <div key={k}>
-          <div className="file-row" onClick={() => toggleExpand(area, f)}>
+          <div
+            className="file-row"
+            onClick={() => toggleExpand(area, f)}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              ui.menu(e, fileMenu(repo.root, f.path, f.status === 'D' || !!f.submodule, ui.toast))
+            }}
+          >
             <span className="chev">{open ? '▾' : '▸'}</span>
             <span className={`st st-${f.status}`}>{f.status === '?' ? 'N' : f.status}</span>
             <span className="grow ellipsis" title={f.path}>
@@ -252,6 +260,11 @@ export function WorkingPanel() {
                     </button>
                   )}
                 </>
+              )}
+              {!f.submodule && f.status !== 'D' && (
+                <button className="btn small ghost" title="Edit the file as it is on disk now, in its own window" onClick={() => api.openEditor(repoFile(repo.root, f.path))}>
+                  Edit
+                </button>
               )}
               {area === 'unstaged' && (
                 <>

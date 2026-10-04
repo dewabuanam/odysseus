@@ -4,6 +4,7 @@ import { useApi } from '../api'
 import { useRepo } from '../repoContext'
 import { useUi } from '../ui'
 import { DiffView } from './DiffView'
+import { fileMenu } from '../menus'
 
 /** How long the diffs of a small commit may hold back showing it, so it appears in one piece. */
 const DIFF_WAIT_MS = 250
@@ -129,7 +130,15 @@ export function CommitPanel({ sha: want }: { sha: string }) {
       </div>
       {detail.files.map((f) => (
         <div key={f.path}>
-          <div className="file-row" onClick={() => toggle(f.path)}>
+          <div
+            className="file-row"
+            onClick={() => toggle(f.path)}
+            onContextMenu={(e) => {
+              e.preventDefault()
+              // The file as it is now in the working tree, not as this commit left it.
+              ui.menu(e, fileMenu(repo.root, f.path, false, ui.toast))
+            }}
+          >
             <span className="chev">{expanded.has(f.path) ? '▾' : '▸'}</span>
             <span className={`st st-${f.status}`}>{f.status}</span>
             <span className="grow ellipsis">

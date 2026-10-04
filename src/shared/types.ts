@@ -419,3 +419,14 @@ export function aggregateAi(states: (AiState | null | undefined)[]): AiState | n
   for (const s of states) if (s && (!out || AI_RANK[s] > AI_RANK[out])) out = s
   return out
 }
+
+/** A file open in an editor window: its text (always with 
+ line breaks) and how it is stored. */
+export interface EditorFile {
+  path: string
+  text: string
+  eol: 'CRLF' | 'LF'
+  /** The file starts with a UTF-8 byte order mark, kept on save */
+  bom: boolean
+  mtimeMs: number
+}

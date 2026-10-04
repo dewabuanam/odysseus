@@ -1,0 +1,56 @@
+/* ---------- file editor window */
+.ed { display: flex; flex-direction: column; height: 100%; }
+
+/* The header is the window's drag region; native window buttons are drawn over its right end. */
+.ed-head {
+  height: 34px; flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 0 146px 0 12px;
+  background: var(--paper-2); border-bottom: 1.5px solid var(--ink); -webkit-app-region: drag;
+}
+.ed.mac .ed-head { padding: 0 10px 0 80px; }
+.ed-head button, .ed-head .ed-actions { -webkit-app-region: no-drag; }
+.ed-name { display: flex; align-items: center; font-family: var(--hand); font-size: 18px; white-space: nowrap; }
+.ed-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink); margin-right: 7px; }
+.ed-path { font-size: 12px; min-width: 0; }
+.ed-actions { display: flex; align-items: center; gap: 2px; }
+
+.ed-banner { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--shade); border-bottom: 1px dashed var(--line); font-size: 12.5px; }
+
+.ed-find { display: flex; flex-direction: column; gap: 4px; padding: 6px 10px; background: var(--paper-2); border-bottom: 1px solid var(--line); }
+.ed-find-row { display: flex; align-items: center; gap: 4px; }
+.ed-find-input { max-width: 420px; font-family: var(--mono); font-size: 12.5px; padding: 3px 8px; user-select: text; }
+.ed-find-input.bad { border-color: var(--diff-del-ink); }
+.ed-opt { border: 1px solid transparent; background: none; border-radius: 4px; font-family: var(--mono); font-size: 12px; padding: 1px 6px; cursor: pointer; color: var(--ink-2); }
+.ed-opt:hover { background: var(--hover); }
+.ed-opt.on { border-color: var(--ink); background: var(--sel); color: var(--ink); }
+.ed-count { min-width: 92px; font-size: 12px; padding: 0 4px; }
+
+.ed-body { flex: 1; min-height: 0; display: flex; background: var(--paper); }
+.ed-gutter {
+  flex-shrink: 0; overflow: hidden; position: relative; font-family: var(--mono); color: var(--ink-3);
+  text-align: right; border-right: 1px dashed var(--line); background: var(--paper-2); padding-top: 8px; user-select: none;
+}
+.ed-gutter-inner { position: relative; padding-right: 8px; will-change: transform; }
+.ed-numbers { margin: 0; font: inherit; }
+.ed-gutter .cur { color: var(--ink); font-weight: 700; }
+.ed-cur-number { position: absolute; left: 0; right: 8px; background: var(--paper-2); }
+
+.ed-text { flex: 1; min-width: 0; position: relative; }
+/* The text box, the match highlights behind it and the wrap measurer share one layout. */
+.ed-area, .ed-backdrop, .ed-mirror { font-family: var(--mono); tab-size: 4; white-space: pre; letter-spacing: 0; }
+.ed-body.wrap .ed-area, .ed-body.wrap .ed-backdrop, .ed-mirror { white-space: pre-wrap; overflow-wrap: break-word; }
+.ed-area {
+  position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; padding: 8px 12px; border: 0; outline: none; resize: none;
+  background: transparent; color: var(--ink); overflow: auto; user-select: text; z-index: 1;
+}
+.ed-area:disabled { color: var(--ink-3); }
+.ed-backdrop { position: absolute; inset: 0; padding: 8px 12px; overflow: hidden; pointer-events: none; color: transparent; }
+.ed-backdrop-inner { will-change: transform; }
+.ed-backdrop mark { color: transparent; background: color-mix(in srgb, var(--ai-working) 32%, transparent); border-radius: 2px; }
+.ed-backdrop mark.cur { background: color-mix(in srgb, var(--ai-working) 70%, transparent); box-shadow: 0 0 0 1px var(--ai-working); }
+.ed-mirror { position: absolute; left: 0; top: 0; visibility: hidden; pointer-events: none; }
+
+.ed-error { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; font-family: var(--hand); font-size: 18px; padding: 24px; text-align: center; }
+
+.ed-status { height: 24px; flex-shrink: 0; display: flex; align-items: center; gap: 14px; padding: 0 12px; font-size: 12px; color: var(--ink-2); border-top: 1px solid var(--line); background: var(--paper-2); white-space: nowrap; }
+.ed-status-btn { border: 0; background: none; padding: 0 4px; cursor: pointer; color: inherit; border-radius: 3px; font-size: 12px; }
+.ed-status-btn:hover { background: var(--hover); color: var(--ink); }

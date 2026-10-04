@@ -11,6 +11,7 @@ export const DEFAULT_KEYS: Bindings = {
   'app.palette': ['Mod+P', 'Mod+Shift+P'],
   'repo.open': ['Mod+O'],
   'repo.recent': ['Mod+Shift+O'],
+  'file.open': ['Mod+Alt+O'],
   'tab.new': ['Mod+T'],
   'tab.close': ['Mod+W'],
   'tab.next': ['Mod+Tab'],

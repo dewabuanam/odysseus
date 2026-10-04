@@ -5,6 +5,7 @@ import type {
   CommandResult,
   Commit,
   CommitDetail,
+  EditorFile,
   CommitOptions,
   EnvDiagnostics,
   FetchOptions,
@@ -84,7 +85,18 @@ export const api = {
   windowMinimize: () => call<void>('windowMinimize'),
   windowToggleMaximize: () => call<void>('windowToggleMaximize'),
   windowClose: () => call<void>('windowClose'),
-  windowIsMaximized: () => call<boolean>('windowIsMaximized')
+  windowIsMaximized: () => call<boolean>('windowIsMaximized'),
+
+  // file editor windows
+  /** Opens a file as it is on disk now in its own editor window */
+  openEditor: (path: string) => call<void>('openEditor', path),
+  pickFile: (defaultPath?: string) => call<string | null>('pickFile', defaultPath),
+  pathKind: (p: string) => call<'file' | 'dir' | null>('pathKind', p),
+  readFile: (path: string) => call<EditorFile>('readFile', path),
+  writeFile: (path: string, text: string, eol: 'CRLF' | 'LF', bom: boolean) => call<number>('writeFile', path, text, eol, bom),
+  editorDirty: (dirty: boolean) => call<void>('editorDirty', dirty),
+  editorPath: (path: string) => call<void>('editorPath', path),
+  editorClose: () => call<void>('editorClose')
 }
 
 /** Calls bound to one repository (one tab). */

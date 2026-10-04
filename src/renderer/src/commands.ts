@@ -440,6 +440,7 @@ export function buildCommands(d: CommandDeps): Cmd[] {
     // repository
     { id: 'repo.open', title: 'Repository: Open…', run: () => { d.api.pickRepo().then((dir) => { if (dir) d.openRepo(dir) }) } },
     { id: 'repo.recent', title: 'Repository: Open Recent…', run: () => recentPicker(d) },
+    { id: 'file.open', title: 'File: Open in Editor…', detail: 'edit a file as it is on disk now, in its own window', run: () => { d.api.pickFile(d.repo?.path).then((p) => { if (p) d.api.openEditor(p) }) } },
     { id: 'repo.parent', title: 'Repository: Open Parent (superproject)', when: !!d.superproject, run: () => d.openRepo(d.superproject!) },
     { id: 'repo.identity', title: 'Repository: Set Author Identity…', detail: 'user.name and user.email', when: has, run: async () => { const cur = await d.api.identity(); return { ...identityFlow(d), value: cur.name } as Step } },
     { id: 'repo.reveal', title: 'Repository: Show in File Manager', when: has, run: () => { d.api.openExternal(d.repo!.path) } },

@@ -580,14 +580,13 @@ body:has(.overlay, .palette-overlay) .titlebar * { -webkit-app-region: no-drag; 
 .sb-item:hover .sb-ref.remote, .sb-item.active .sb-ref.remote { border-color: var(--ref-lane, var(--ink)); border-style: dashed; color: var(--ref-lane, var(--ink-2)); }
 .sb-item .sb-ref.branch.head { background: var(--ref-lane, var(--ink)); border-color: var(--ref-lane, var(--ink)); color: var(--paper); }
 
-/* ---------- tab row drag and drop: a bar marks where the dragged tab or group lands */
-.tab.dragging, .tab-group.dragging { opacity: 0.45; }
-.tab.drop-before, .tab.drop-after, .tab-group.drop-before, .tab-group.drop-after { overflow: visible; }
-.tab.drop-before::before, .tab.drop-after::before, .tab-group.drop-before::before, .tab-group.drop-after::before {
-  content: ''; position: absolute; top: 2px; bottom: 2px; width: 3px; border-radius: 2px; background: var(--ink); pointer-events: none; z-index: 2;
-}
-.tab.drop-before::before, .tab-group.drop-before::before { left: -3px; }
-.tab.drop-after::before, .tab-group.drop-after::before { right: -3px; }
+/* ---------- tab row dragging: the dragged tab or group follows the pointer, above the others */
+.tabbar { position: relative; user-select: none; }
+.tabbar.dragging, .tabbar.dragging * { cursor: default; }
+.tab.lifted, .tab-group.lifted, .tab-group-box.lifted { z-index: 5; }
+.tab.lifted { background: var(--paper); box-shadow: 2px 0 0 var(--line), -2px 0 0 var(--line); }
+.tab-group-box.lifted, .tab-group.lifted:not(.open) { box-shadow: 0 0 0 1.5px var(--group), 2px 3px 0 var(--line); }
+.tabbar.dragging .tab:not(.lifted):hover { background: none; }
 
 /* ---------- Odyssey drawings for empty, quiet places: graphite on paper, chalk on the board.
    The texture is a static noise mask, rasterized once, so it costs nothing while you work. */

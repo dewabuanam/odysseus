@@ -17,6 +17,8 @@ import { aggregateAi } from '../src/shared/types'
 import { detectAiState } from '../src/renderer/src/aiState'
 import { dropInBar } from '../src/renderer/src/workspaces'
 import { installAiSkills } from '../src/main/aiSkills'
+import { applyLineOp, buildRegex, findAll, formatJson, JsonError, lineCol, lineComment, lineStart, minifyJson, replaceAll, replacement } from '../src/shared/textOps'
+import { readEditorFile } from '../src/main/editorFile'
 
 const settings: Settings = {
   extraPath: [],
@@ -697,6 +699,34 @@ async function main() {
     assert.equal(readFileSync(own, 'utf8'), 'prompt = "mine"\n', "the user's own command is kept")
     assert.equal(installAiSkills(home).length, 0, 'unchanged files are not rewritten')
     rmSync(home, { recursive: true, force: true })
+  })
+
+  await test('editor: find, replace, JSON formatting and line tools', async () => {
+    const o = { caseSensitive: false, wholeWord: false, regex: false }
+    const text = 'foo Foo food\nbar foo'
+    assert.deepEqual(findAll(text, buildRegex('foo', o) as RegExp), [[0, 3], [4, 7], [8, 11], [17, 20]])
+    assert.equal(findAll(text, buildRegex('foo', { ...o, caseSensitive: true, wholeWord: true }) as RegExp).length, 2)
+    assert.equal(typeof buildRegex('a(', { ...o, regex: true }), 'string', 'a bad pattern is an error message')
+    assert.equal(findAll('a.b', buildRegex('.', o) as RegExp).length, 1, 'plain text is not a pattern')
+    const re = buildRegex('(\\w+)@(\\w+)', { ...o, regex: true }) as RegExp
+    assert.equal(replaceAll('a@b c@d', re, '$2@$1', true).text, 'b@a d@c')
+    assert.equal(replaceAll('x x', buildRegex('x', o) as RegExp, '$1', false).text, '$1 $1', 'plain replace keeps $ literally')
+    assert.equal(replacement('a@b c@d', 4, 7, re, '$2.$1', true), 'd.c')
+    assert.deepEqual(lineCol('ab\ncd', 4), { line: 2, col: 2 })
+    assert.equal(lineStart('ab\ncd\nef', 3), 6)
+    assert.equal(formatJson('{"a":[1,2]}'), '{\n  "a": [\n    1,\n    2\n  ]\n}')
+    assert.equal(minifyJson('{ "a" : 1 }'), '{"a":1}')
+    assert.throws(() => formatJson('{\n  "a": 1,\n}'), (e: unknown) => e instanceof JsonError && /line 3/.test(e.message))
+    assert.deepEqual(applyLineOp(['b', 'a10', 'a2', 'b'], 'sort'), ['a2', 'a10', 'b', 'b'])
+    assert.deepEqual(applyLineOp(['b', 'a', 'b'], 'unique'), ['b', 'a'])
+    assert.equal(lineComment('x.ts'), '//')
+    assert.equal(lineComment('x.py'), '#')
+    const f = join(dir, 'crlf.txt')
+    writeFileSync(f, '﻿one\r\ntwo\r\n')
+    const ed = readEditorFile(f)
+    assert.deepEqual([ed.text, ed.eol, ed.bom], ['one\ntwo\n', 'CRLF', true])
+    writeFileSync(f, Buffer.from([0x61, 0, 0x62]))
+    assert.throws(() => readEditorFile(f), /binary/)
   })
 
   rmSync(dir, { recursive: true, force: true })
