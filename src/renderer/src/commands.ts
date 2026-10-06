@@ -19,6 +19,7 @@ export interface CommitRequest {
   amend?: boolean
   noVerify?: boolean
   signoff?: boolean
+  allowEmpty?: boolean
 }
 
 export type CommitAction = 'focus' | 'commit' | 'commit-no-verify' | 'amend' | CommitRequest
@@ -245,6 +246,7 @@ export function buildCommands(d: CommandDeps): Cmd[] {
       { id: 'c', title: 'Commit staged changes', cmdline: 'git commit', detail: `${s?.staged.length ?? 0} file(s)`, run: message({}, 'Commit') },
       { id: 'a', title: 'Amend last commit', cmdline: 'git commit --amend', run: message({ amend: true }, 'Amend') },
       { id: 's', title: 'Commit with sign-off', cmdline: 'git commit --signoff', run: message({ signoff: true }, 'Sign-off') },
+      { id: 'e', title: 'Empty commit', cmdline: 'git commit --allow-empty', detail: 'no file changes, only the message', run: message({ allowEmpty: true }, 'Empty') },
       { id: 'n', title: 'Commit without hooks', cmdline: 'git commit --no-verify', detail: 'skips pre-commit and commit-msg', run: message({ noVerify: true }, 'No hooks') }
     ])
   }
@@ -447,7 +449,7 @@ export function buildCommands(d: CommandDeps): Cmd[] {
     { id: 'repo.close', title: 'Repository: Close', when: has, run: () => d.closeRepo() },
 
     // commit
-    { id: 'commit', title: 'Commit…', detail: 'commit, amend, sign-off, no hooks', when: has, run: commitFlow },
+    { id: 'commit', title: 'Commit…', detail: 'commit, amend, sign-off, empty, no hooks', when: has, run: commitFlow },
     { id: 'commit.focus', title: 'Commit: Write Message in Editor', detail: 'multi-line message', when: has, run: () => d.commitAction('focus') },
     { id: 'commit.commit', title: 'Commit: Commit Staged Now', when: has && !!s?.staged.length, run: () => d.commitAction('commit') },
     { id: 'commit.noverify', title: 'Commit: Commit Without Hooks', cmdline: 'git commit --no-verify', when: has && !!s?.staged.length, run: () => d.commitAction('commit-no-verify') },

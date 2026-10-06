@@ -113,6 +113,17 @@ async function main() {
     assert.equal(hookEvents.length, 0)
   })
 
+  await test('empty commit: nothing staged, only the message', async () => {
+    const before = sh(dir, 'rev-parse', 'HEAD').trim()
+    assert.equal((await repo.commit({ message: 'nothing staged' })).ok, false, 'a plain commit with nothing staged fails')
+    const r = await repo.commit({ message: 'chore: trigger CI', allowEmpty: true })
+    assert.ok(r.ok, r.stderr)
+    assert.equal(sh(dir, 'rev-parse', 'HEAD~1').trim(), before)
+    assert.equal(sh(dir, 'diff', '--name-only', 'HEAD~1', 'HEAD').trim(), '')
+    assert.equal(sh(dir, 'log', '-1', '--format=%s').trim(), 'chore: trigger CI')
+    sh(dir, 'reset', '--soft', 'HEAD~1')
+  })
+
   await test('hunk staging: stage only the first of two hunks', async () => {
     const edited = [...lines]
     edited[1] = 'CHANGED 2'

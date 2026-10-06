@@ -159,9 +159,11 @@ export function WorkingPanel() {
     }
   }
 
-  const doCommit = async (noVerify = skipHooks, req?: { message: string; amend?: boolean; signoff?: boolean }) => {
+  const doCommit = async (noVerify = skipHooks, req?: { message: string; amend?: boolean; signoff?: boolean; allowEmpty?: boolean }) => {
     const msg = req?.message ?? message
     const isAmend = req?.amend ?? amend
+    // With nothing staged, a commit is an empty one: it records only the message.
+    const empty = req?.allowEmpty ?? (!isAmend && status.staged.length === 0)
     if (!msg.trim()) {
       ui.toast('Enter a commit message', true)
       return
@@ -171,14 +173,14 @@ export function WorkingPanel() {
     setFailure(null)
     setModifiedByHook([])
     if (req) setMessage(req.message)
-    const result = await repo.exec(() => api.commit({ message: msg, amend: isAmend, noVerify, signoff: req?.signoff }))
+    const result = await repo.exec(() => api.commit({ message: msg, amend: isAmend, noVerify, signoff: req?.signoff, allowEmpty: empty || undefined }))
     setCommitting(false)
 
     if (result.ok) {
       setMessage('')
       setAmend(false)
       preAmendMessage.current = null
-      ui.toast(isAmend ? 'Commit amended' : 'Committed')
+      ui.toast(isAmend ? 'Commit amended' : empty ? 'Empty commit made' : 'Committed')
     } else if (!result.cancelled) {
       const run = runStore.get().find((r) => norm(r.root) === norm(repo.root) && r.endedAt !== undefined)
       setFailure({ result, output: run?.output ?? result.stderr + result.stdout, hook: result.failedHook, amend: isAmend })
@@ -328,8 +330,13 @@ export function WorkingPanel() {
           {running ? (
             <button className="btn danger" onClick={() => api.cancelRun(activeRun.id)}>Cancel</button>
           ) : (
-            <button className="btn primary" disabled={committing || (!amend && status.staged.length === 0)} onClick={() => doCommit()}>
-              {amend ? 'Amend' : `Commit${status.staged.length ? ` ${status.staged.length} file${status.staged.length > 1 ? 's' : ''}` : ''}`}
+            <button
+              className="btn primary"
+              disabled={committing}
+              title={!amend && !status.staged.length ? 'Nothing is staged: git commit --allow-empty records only the message' : undefined}
+              onClick={() => doCommit()}
+            >
+              {amend ? 'Amend' : status.staged.length ? `Commit ${status.staged.length} file${status.staged.length > 1 ? 's' : ''}` : 'Empty commit'}
             </button>
           )}
         </div>

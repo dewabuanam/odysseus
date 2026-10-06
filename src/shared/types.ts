@@ -282,6 +282,8 @@ export interface CommitOptions {
   amend?: boolean
   noVerify?: boolean
   signoff?: boolean
+  /** Commit even with nothing staged (`--allow-empty`) */
+  allowEmpty?: boolean
 }
 
 export interface PushOptions {

@@ -288,6 +288,7 @@ export class GitRepo {
     if (opts.amend) args.push('--amend')
     if (opts.noVerify) args.push('--no-verify')
     if (opts.signoff) args.push('--signoff')
+    if (opts.allowEmpty) args.push('--allow-empty')
     try {
       return await this.run(opts.amend ? 'Amend commit' : 'Commit', args)
     } finally {
