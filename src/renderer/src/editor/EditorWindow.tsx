@@ -19,14 +19,25 @@ import {
   type FindOptions,
   type LineOp
 } from '@shared/textOps'
+import { isMarkdownPath, parseMarkdown } from '@shared/markdown'
 import { api } from '../api'
 import { UiProvider, useUi, type MenuItem } from '../ui'
+import { followLink, MarkdownPreview } from './MarkdownPreview'
 import './editor.css'
 
 /** Wrapped lines get exact line numbers up to this many lines; beyond it the gutter hides. */
 const WRAP_GUTTER_MAX = 20000
 /** Matches are highlighted behind the text up to this file size. */
 const HIGHLIGHT_MAX = 3_000_000
+/** The markdown preview waits this long after typing stops before it redraws. */
+const PREVIEW_DELAY = 120
+
+type MdView = 'edit' | 'split' | 'preview'
+const MD_VIEWS: [MdView, string][] = [
+  ['edit', 'Edit'],
+  ['split', 'Split'],
+  ['preview', 'Preview']
+]
 
 const baseName = (p: string) => p.split(/[\\/]/).pop() ?? p
 const dirName = (p: string) => p.replace(/[\\/][^\\/]*$/, '')
@@ -61,7 +72,8 @@ type Banner = { kind: 'changed' | 'deleted' } | null
 /**
  * A small text editor in its own window, for a file as it is on disk now: line numbers,
  * find and replace (regex, whole word, match case), go to line, JSON formatting, line tools,
- * and the file's own line endings and byte order mark kept on save.
+ * a live preview beside markdown files, and the file's own line endings and byte order mark
+ * kept on save.
  */
 function EditorWindow({ initialPath }: { initialPath: string }) {
   const ui = useUi()
@@ -83,18 +95,23 @@ function EditorWindow({ initialPath }: { initialPath: string }) {
   const [current, setCurrent] = useState(-1)
   const [heights, setHeights] = useState<number[] | null>(null)
   const [boxWidth, setBoxWidth] = useState(0)
+  const [mdView, setMdView] = useState<MdView>(() => loadPref('mdView', 'split'))
+  const [mdText, setMdText] = useState<string | null>(null)
 
   const ta = useRef<HTMLTextAreaElement>(null)
   const gutterInner = useRef<HTMLDivElement>(null)
   const backInner = useRef<HTMLDivElement>(null)
   const mirror = useRef<HTMLDivElement>(null)
   const findInput = useRef<HTMLInputElement>(null)
+  const previewBox = useRef<HTMLDivElement>(null)
   const saved = useRef('')
   const bom = useRef(false)
 
   const lineHeight = Math.round(fontSize * 1.5)
   const text = () => ta.current?.value ?? ''
   const name = baseName(path)
+  const isMd = isMarkdownPath(path)
+  const view: MdView = isMd ? mdView : 'edit'
 
   // ------------------------------------------------------------ loading and saving
 
@@ -241,6 +258,7 @@ function EditorWindow({ initialPath }: { initialPath: string }) {
   }
 
   const goToLine = async () => {
+    if (view === 'preview') showView('split')
     const r = await ui.ask({ title: 'Go to line', input: { label: `Line (1 to ${countLines(text())}), or line:column`, placeholder: `${caret.line}` }, confirmLabel: 'Go' })
     const m = r && /^(\d+)(?::(\d+))?$/.exec(r.value)
     if (!m || !ta.current) return
@@ -383,6 +401,12 @@ function EditorWindow({ initialPath }: { initialPath: string }) {
     setWrap(!wrap)
     savePref('wrap', !wrap)
   }
+  const showView = (v: MdView) => {
+    setMdView(v)
+    savePref('mdView', v)
+    if (v !== 'preview') requestAnimationFrame(() => ta.current?.focus())
+  }
+  const cycleView = () => showView(MD_VIEWS[(MD_VIEWS.findIndex(([v]) => v === view) + 1) % MD_VIEWS.length][0])
 
   const toolsMenu = (): MenuItem[] => [
     { label: 'Format JSON (Alt+Shift+F)', action: () => jsonTool((t) => formatJson(t, indentUnit === '\t' ? '\t' : indentUnit.length)) },
@@ -417,6 +441,14 @@ function EditorWindow({ initialPath }: { initialPath: string }) {
       ]
     },
     { separator: true, label: '' },
+    ...(isMd
+      ? [
+          {
+            label: 'Markdown view (Ctrl+Shift+V)',
+            submenu: MD_VIEWS.map(([v, label]) => ({ label: `${view === v ? '✓ ' : ''}${label}`, action: () => showView(v) }))
+          }
+        ]
+      : []),
     { label: `${wrap ? '✓ ' : ''}Word wrap (Alt+Z)`, action: toggleWrap },
     { label: 'Go to line… (Ctrl+G)', action: goToLine },
     { label: 'Reload from disk', action: () => load(path, true) },
@@ -487,6 +519,7 @@ function EditorWindow({ initialPath }: { initialPath: string }) {
   }
 
   const openFind = (mode: 'find' | 'replace') => {
+    if (view === 'preview') showView('split')
     const el = ta.current
     const sel = el ? el.value.slice(el.selectionStart, el.selectionEnd) : ''
     if (sel && !sel.includes('\n')) setQuery(sel)
@@ -562,6 +595,7 @@ function EditorWindow({ initialPath }: { initialPath: string }) {
     if (mod && k === '-') return take(() => zoom(-1))
     if (mod && k === '0') return take(() => zoom(null))
     if (e.altKey && !mod && k === 'z') return take(toggleWrap)
+    if (isMd && mod && e.shiftKey && k === 'v') return take(cycleView)
     if (e.altKey && e.shiftKey && k === 'f') return take(() => jsonTool((t) => formatJson(t, indentUnit === '\t' ? '\t' : indentUnit.length)))
     if (e.key === 'F3') return take(() => (find ? findStep(e.shiftKey ? -1 : 1) : openFind('find')))
     if (e.key === 'Escape' && find && !document.querySelector('.overlay')) return take(() => (setFind(null), ta.current?.focus()))
@@ -636,6 +670,56 @@ function EditorWindow({ initialPath }: { initialPath: string }) {
 
   useLayoutEffect(syncScroll)
 
+  // ------------------------------------------------------------ markdown preview
+
+  // The preview reads the text a moment after typing stops, so long files stay quick to edit.
+  useEffect(() => {
+    if (view === 'edit') return setMdText(null)
+    if (!file) return
+    const t = setTimeout(() => setMdText(text()), mdText === null ? 0 : PREVIEW_DELAY)
+    return () => clearTimeout(t)
+  }, [view, version, file])
+  const doc = useMemo(() => (view !== 'edit' && mdText !== null ? parseMarkdown(mdText) : null), [view, mdText])
+
+  /** Scrolls the preview to the block at the top of the text box. */
+  const syncPreview = () => {
+    const el = ta.current
+    const box = previewBox.current
+    if (view !== 'split' || !el || !box) return
+    if (el.scrollTop >= el.scrollHeight - el.clientHeight - 1) return void (box.scrollTop = box.scrollHeight)
+    let top = el.scrollTop / lineHeight
+    if (heights) {
+      let y = 0
+      let i = 0
+      while (i < heights.length && y + heights[i] <= el.scrollTop) y += heights[i++]
+      top = i + (heights[i] ? (el.scrollTop - y) / heights[i] : 0)
+    }
+    let a = { line: 0, y: 0 }
+    let b: typeof a | null = null
+    for (const node of box.querySelectorAll<HTMLElement>('[data-line]')) {
+      const at = { line: Number(node.dataset.line), y: node.offsetTop }
+      if (at.line <= top) a = at
+      else {
+        b = at
+        break
+      }
+    }
+    box.scrollTop = b ? a.y + ((b.y - a.y) * (top - a.line)) / Math.max(1, b.line - a.line) : a.y + (top - a.line) * lineHeight
+  }
+  useLayoutEffect(syncPreview, [doc, view])
+
+  const toggleTask = (line: number) => {
+    const t = text()
+    const s = lineStart(t, line + 1)
+    const e = t.indexOf('\n', s)
+    const m = /^((?:[ \t]*>)*[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+\[)([ xX])\]/.exec(t.slice(s, e === -1 ? t.length : e))
+    if (!m) return
+    const at = s + m[1].length
+    edit(at, at + 1, m[2] === ' ' ? 'x' : ' ', at + 1)
+    // Ticking a box in the preview alone shouldn't leave the hidden text taking keys.
+    if (view === 'preview') ta.current?.blur()
+  }
+
   const highlight = find && matches.length > 0 && text().length <= HIGHLIGHT_MAX
   const backdrop = useMemo<ReactNode>(() => {
     if (!highlight) return null
@@ -669,6 +753,15 @@ function EditorWindow({ initialPath }: { initialPath: string }) {
         <span className="ed-path faint ellipsis" title={path}>{dirName(path)}</span>
         <span className="grow" />
         <div className="ed-actions">
+          {isMd && (
+            <div className="ed-views" role="group" title="Markdown view (Ctrl+Shift+V)">
+              {MD_VIEWS.map(([v, label]) => (
+                <button key={v} className={`ed-opt ${view === v ? 'on' : ''}`} onClick={() => showView(v)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
           <button className="btn small ghost" title="Open a file (Ctrl+O)" onClick={openFile}>Open…</button>
           <button className="btn small ghost" title="Find (Ctrl+F)" onClick={() => openFind('find')}>Find</button>
           <button className="btn small ghost" title="Replace (Ctrl+H)" onClick={() => openFind('replace')}>Replace</button>
@@ -758,54 +851,66 @@ function EditorWindow({ initialPath }: { initialPath: string }) {
           </div>
         </div>
       ) : (
-        <div className={`ed-body ${wrap ? 'wrap' : ''}`}>
-          {(!wrap || heights) && (
-            <div className="ed-gutter" style={{ ...textStyle, width: `${gutterChars + 2}ch` }}>
-              <div ref={gutterInner} className="ed-gutter-inner">
-                {heights
-                  ? heights.map((h, i) => (
-                      <div key={i} style={{ height: h }} className={i + 1 === caret.line ? 'cur' : ''}>
-                        {i + 1}
-                      </div>
-                    ))
-                  : (
-                      <>
-                        <pre className="ed-numbers">{numbers}</pre>
-                        <div className="cur ed-cur-number" style={{ top: (caret.line - 1) * lineHeight, height: lineHeight }}>
-                          {caret.line}
+        <div className={`ed-split ${view}`}>
+          <div className={`ed-body ${wrap ? 'wrap' : ''}`} aria-hidden={view === 'preview' || undefined}>
+            {(!wrap || heights) && (
+              <div className="ed-gutter" style={{ ...textStyle, width: `${gutterChars + 2}ch` }}>
+                <div ref={gutterInner} className="ed-gutter-inner">
+                  {heights
+                    ? heights.map((h, i) => (
+                        <div key={i} style={{ height: h }} className={i + 1 === caret.line ? 'cur' : ''}>
+                          {i + 1}
                         </div>
-                      </>
-                    )}
-              </div>
-            </div>
-          )}
-          <div className="ed-text">
-            {highlight && (
-              <div className="ed-backdrop" style={textStyle} aria-hidden>
-                <div ref={backInner} className="ed-backdrop-inner" style={{ width: wrap ? Math.max(0, boxWidth - 24) : undefined }}>
-                  {backdrop}
+                      ))
+                    : (
+                        <>
+                          <pre className="ed-numbers">{numbers}</pre>
+                          <div className="cur ed-cur-number" style={{ top: (caret.line - 1) * lineHeight, height: lineHeight }}>
+                            {caret.line}
+                          </div>
+                        </>
+                      )}
                 </div>
               </div>
             )}
-            <textarea
-              ref={ta}
-              className="ed-area"
-              style={textStyle}
-              spellCheck={false}
-              wrap={wrap ? 'soft' : 'off'}
-              disabled={!file}
-              onInput={() => {
-                setVersion((v) => v + 1)
-                updateCaret()
-              }}
-              onScroll={syncScroll}
-              onSelect={updateCaret}
-              onKeyUp={updateCaret}
-              onMouseUp={updateCaret}
-              onKeyDown={onTextKey}
-            />
-            <div ref={mirror} className="ed-mirror" style={textStyle} aria-hidden />
+            <div className="ed-text">
+              {highlight && (
+                <div className="ed-backdrop" style={textStyle} aria-hidden>
+                  <div ref={backInner} className="ed-backdrop-inner" style={{ width: wrap ? Math.max(0, boxWidth - 24) : undefined }}>
+                    {backdrop}
+                  </div>
+                </div>
+              )}
+              <textarea
+                ref={ta}
+                className="ed-area"
+                style={textStyle}
+                spellCheck={false}
+                wrap={wrap ? 'soft' : 'off'}
+                disabled={!file}
+                onInput={() => {
+                  setVersion((v) => v + 1)
+                  updateCaret()
+                }}
+                onScroll={() => (syncScroll(), syncPreview())}
+                onSelect={updateCaret}
+                onKeyUp={updateCaret}
+                onMouseUp={updateCaret}
+                onKeyDown={onTextKey}
+              />
+              <div ref={mirror} className="ed-mirror" style={textStyle} aria-hidden />
+            </div>
           </div>
+          {view !== 'edit' && doc && (
+            <MarkdownPreview
+              doc={doc}
+              dir={dirName(path)}
+              fontSize={fontSize}
+              boxRef={previewBox}
+              follow={(href) => followLink(href, dirName(path), previewBox.current, (m) => ui.toast(m))}
+              toggleTask={toggleTask}
+            />
+          )}
         </div>
       )}
 

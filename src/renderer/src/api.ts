@@ -98,6 +98,8 @@ export const api = {
   pickFile: (defaultPath?: string) => call<string | null>('pickFile', defaultPath),
   pathKind: (p: string) => call<'file' | 'dir' | null>('pathKind', p),
   readFile: (path: string) => call<EditorFile>('readFile', path),
+  /** A local image as a data URL, or null when it isn't one that can be shown */
+  readImage: (path: string) => call<string | null>('readImage', path),
   writeFile: (path: string, text: string, eol: 'CRLF' | 'LF', bom: boolean) => call<number>('writeFile', path, text, eol, bom),
   editorDirty: (dirty: boolean) => call<void>('editorDirty', dirty),
   editorPath: (path: string) => call<void>('editorPath', path),

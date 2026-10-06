@@ -29,3 +29,29 @@ export function readEditorFile(path: string): EditorFile {
   const lf = (text.match(/\n/g) ?? []).length - crlf
   return { path, text: text.replace(/\r\n/g, '\n'), eol: crlf > lf ? 'CRLF' : 'LF', bom, mtimeMs: st.mtimeMs }
 }
+
+const IMAGE_TYPES: Record<string, string> = {
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  bmp: 'image/bmp',
+  svg: 'image/svg+xml',
+  ico: 'image/x-icon',
+  avif: 'image/avif'
+}
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024
+
+/** Reads a local image as a data URL, for a markdown preview (the page can't load file:// URLs). */
+export function readImageDataUrl(path: string): string | null {
+  const type = IMAGE_TYPES[path.toLowerCase().split('.').pop() ?? '']
+  if (!type) return null
+  try {
+    const st = statSync(path)
+    if (!st.isFile() || st.size > MAX_IMAGE_BYTES) return null
+    return `data:${type};base64,${readFileSync(path).toString('base64')}`
+  } catch {
+    return null
+  }
+}

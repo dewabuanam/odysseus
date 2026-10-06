@@ -8,7 +8,7 @@ import { GitRunner } from './git/runner'
 import { TerminalService } from './terminal'
 import { aiCommands } from './aiCommands'
 import { installAiSkills } from './aiSkills'
-import { closeEditor, editorOptions, openEditor, pathKind, pickFile, readEditorFile, setEditorDirty, setEditorPath, writeEditorFile } from './editor'
+import { closeEditor, editorOptions, openEditor, pathKind, pickFile, readEditorFile, readImageDataUrl, setEditorDirty, setEditorPath, writeEditorFile } from './editor'
 import {
   addHistory,
   addRecent,
@@ -486,6 +486,7 @@ const editorApi: Record<string, EditorHandler> = {
   pickFile: (e, defaultPath?: string) => pickFile(e, defaultPath),
   pathKind: (_e, p: string) => pathKind(p),
   readFile: (_e, path: string) => readEditorFile(path),
+  readImage: (_e, path: string) => readImageDataUrl(path),
   writeFile: (e, path: string, text: string, eol: 'CRLF' | 'LF', bom: boolean) => writeEditorFile(e, path, text, eol, bom),
   editorDirty: (e, dirty: boolean) => setEditorDirty(e, dirty),
   editorPath: (e, path: string) => setEditorPath(e, path),

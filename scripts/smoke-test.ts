@@ -18,7 +18,8 @@ import { detectAiState } from '../src/renderer/src/aiState'
 import { dropInBar } from '../src/renderer/src/workspaces'
 import { installAiSkills } from '../src/main/aiSkills'
 import { applyLineOp, buildRegex, findAll, formatJson, JsonError, lineCol, lineComment, lineStart, minifyJson, replaceAll, replacement } from '../src/shared/textOps'
-import { readEditorFile } from '../src/main/editorFile'
+import { readEditorFile, readImageDataUrl } from '../src/main/editorFile'
+import { isMarkdownPath, parseMarkdown, type Block } from '../src/shared/markdown'
 import { attachText } from '../src/shared/attach'
 
 const settings: Settings = {
@@ -740,6 +741,70 @@ async function main() {
     assert.deepEqual([ed.text, ed.eol, ed.bom], ['one\ntwo\n', 'CRLF', true])
     writeFileSync(f, Buffer.from([0x61, 0, 0x62]))
     assert.throws(() => readEditorFile(f), /binary/)
+    const png = join(dir, 'dot.png')
+    writeFileSync(png, Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+    assert.equal(readImageDataUrl(png), 'data:image/png;base64,iVBORw==')
+    assert.equal(readImageDataUrl(f), null, 'not an image type')
+    assert.equal(readImageDataUrl(join(dir, 'missing.png')), null)
+  })
+
+  await test('markdown preview reads blocks and inlines', async () => {
+    const one = (md: string) => parseMarkdown(md)[0]
+    const strip = (b: Block[]): unknown => JSON.parse(JSON.stringify(b, (k, v) => (k === 'line' ? undefined : v)))
+    assert.ok(isMarkdownPath('C:\\x\\README.md') && isMarkdownPath('a.markdown') && !isMarkdownPath('a.txt'))
+    assert.deepEqual(strip([one('## Hello *there* ##')]), [{ t: 'h', level: 2, id: 'hello-there', c: ['Hello ', { t: 'em', c: ['there'] }] }])
+    assert.deepEqual(strip(parseMarkdown('# A\n# A')).map((b) => (b as { id: string }).id), ['a', 'a-1'])
+    assert.deepEqual(strip([one('Title\n===')]), [{ t: 'h', level: 1, id: 'title', c: ['Title'] }])
+    assert.deepEqual(strip([one('**b** _i_ ~~d~~ `c` snake_case_name')]), [
+      { t: 'p', c: [{ t: 'strong', c: ['b'] }, ' ', { t: 'em', c: ['i'] }, ' ', { t: 'del', c: ['d'] }, ' ', { t: 'code', v: 'c' }, ' snake_case_name'] }
+    ])
+    assert.deepEqual(strip([one('***both***')]), [{ t: 'p', c: [{ t: 'strong', c: [{ t: 'em', c: ['both'] }] }] }])
+    assert.deepEqual(strip([one('2 * 3 * 4 and \\*not\\*')]), [{ t: 'p', c: ['2 * 3 * 4 and ', '*', 'not', '*'] }])
+    assert.deepEqual(strip([one('[a](x.md "T") ![p](i.png) see https://e.com/a_(b).')]), [
+      {
+        t: 'p',
+        c: [
+          { t: 'link', href: 'x.md', title: 'T', c: ['a'] },
+          ' ',
+          { t: 'img', src: 'i.png', alt: 'p' },
+          ' see ',
+          { t: 'link', href: 'https://e.com/a_(b)', c: ['https://e.com/a_(b)'] },
+          '.'
+        ]
+      }
+    ])
+    assert.deepEqual(strip([one('[ref] and [x][ref]\n\n[ref]: https://r.io')]), [
+      { t: 'p', c: [{ t: 'link', href: 'https://r.io', c: ['ref'] }, ' and ', { t: 'link', href: 'https://r.io', c: ['x'] }] }
+    ])
+    assert.deepEqual(strip([one('line one  \nline two')]), [{ t: 'p', c: ['line one', { t: 'br' }, 'line two'] }])
+    assert.deepEqual(strip([one('<p align="center"><img src="logo.png" alt="L"><br>Hi &amp; bye</p>')]), [
+      { t: 'p', c: [{ t: 'img', src: 'logo.png', alt: 'L' }, { t: 'br' }, 'Hi & bye'] }
+    ])
+    assert.equal(parseMarkdown('<!-- hidden -->').length, 0)
+    assert.deepEqual(strip([one('```ts\nconst a = 1\n\n```')]), [{ t: 'code', lang: 'ts', v: 'const a = 1\n' }])
+    assert.deepEqual(strip([one('    indented\n    code')]), [{ t: 'code', lang: '', v: 'indented\ncode' }])
+    assert.deepEqual(strip([one('---')]), [{ t: 'hr' }])
+
+    const list = one('- [ ] todo\n- [x] done\n  - nested\n- plain') as Extract<Block, { t: 'list' }>
+    assert.equal(list.tight, true)
+    assert.deepEqual(list.items.map((i) => [i.line, i.task]), [[0, false], [1, true], [3, null]])
+    assert.equal(list.items[1].c[1].t, 'list', 'an indented item nests')
+    const ol = one('3. a\n4. b\n\n5. c') as Extract<Block, { t: 'list' }>
+    assert.deepEqual([ol.ordered, ol.start, ol.tight, ol.items.length], [true, 3, false, 3])
+    assert.equal(strip(parseMarkdown('1. a\n2. b')).length, 1, 'the second number is another item, not a lazy line')
+    assert.equal(parseMarkdown('- a\n* b').length, 2, 'a new bullet starts a new list')
+
+    const q = one('> [!WARNING]\n> Careful *now*') as Extract<Block, { t: 'quote' }>
+    assert.equal(q.alert, 'warning')
+    assert.deepEqual(strip(q.c), [{ t: 'p', c: ['Careful ', { t: 'em', c: ['now'] }] }])
+    assert.deepEqual(strip([one('> quoted\nlazy')]), [{ t: 'quote', alert: null, c: [{ t: 'p', c: ['quoted\nlazy'] }] }])
+
+    const table = one('| L | C | R |\n|:--|:-:|--:|\n| 1 | `a\\|b` |\n') as Extract<Block, { t: 'table' }>
+    assert.deepEqual(table.align, ['left', 'center', 'right'])
+    assert.deepEqual(strip([table]), [
+      { t: 'table', align: ['left', 'center', 'right'], head: [['L'], ['C'], ['R']], rows: [[['1'], [{ t: 'code', v: 'a|b' }], []]] }
+    ])
+    assert.deepEqual(parseMarkdown('# A\n\ntext\n\n- x').map((b) => b.line), [0, 2, 4], 'blocks know their source line')
   })
 
   rmSync(dir, { recursive: true, force: true })

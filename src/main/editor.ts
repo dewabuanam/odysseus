@@ -1,7 +1,7 @@
 import { BrowserWindow, dialog, nativeImage, type IpcMainInvokeEvent } from 'electron'
 import { existsSync, statSync, watch, writeFileSync, type FSWatcher } from 'node:fs'
 import { basename, join } from 'node:path'
-export { pathKind, readEditorFile } from './editorFile'
+export { pathKind, readEditorFile, readImageDataUrl } from './editorFile'
 
 interface EditorWin {
   win: BrowserWindow
